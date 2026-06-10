@@ -1,0 +1,1513 @@
+
+小程序 AI 开发模式（beta）接入指南
+小程序 AI 开发模式（以下简称此模式）提供了一套智能化的运行环境和开发框架，开发者基于该框架，将小程序的功能抽象为原子接口和原子组件，并封装成 SKILL，供小程序 AI 调用。
+
+当用户通过小程序 AI 发起对话时，小程序 AI 会通过小程序 MCP 协议分析并选择合适的原子接口和原子组件，完成数据处理和任务执行，最终整合结果给到用户。
+
+用户在此模式下的登录身份跟原小程序保持一致，开发者可以通过 storage 接口共享小程序内的登录凭证，也可以通过 wx.login、wx.getPhoneNumber 等接口完成登录流程。
+
+当前处于内测阶段，暂未开放小程序 AI 开发模式的代码提审，提审时间将另行通知。请勿将此模式相关代码合入正式版本提交审核，以免影响正常版本发布。
+
+基本概念
+1、小程序 MCP
+小程序 MCP 是向小程序 AI 暴露可调用能力的一套协议，与标准 MCP 不同，小程序 MCP 适应于小程序开发的特点，开发者只需要按设计提供完整的 SKILL 实现，小程序 AI 就能正确地推理及执行相应的原子接口，最终完成用户的需求。
+
+2、原子接口
+此模式的最小执行单元，封装单一的业务功能，具有标准化输入参数和输出结构，运行在微信客户端的独立 JS 环境中。
+
+3、原子组件
+原子接口的可视化展示单元，将原子接口返回的结构化数据渲染为 GUI 卡片，展示在对话流中。
+
+4、SKILL
+完成特定场景任务的完整能力封装，一个小程序可封装多个 SKILLs，每个 SKILL 包含：业务说明（SKILL.md）、模型可调用能力的声明（mcp.json）、原子接口与原子组件的实现。
+
+开发指南
+申请开启
+在网页端「微信公众平台 - 基础功能 - AI能力」或小程序「微信开发者助手」中「管理 - 微信AI管理」中的接入模式选择「开发模式」进行申请。
+
+接入方式
+开发者可参考 接入方式 ，将小程序的功能抽象为原子接口和原子组件，并封装成 SKILL，供小程序 AI 调用。
+
+运行机制
+此模式的运行机制涉及微信客户端运行时、小程序 AI 后台、第三方服务之间的交互，其中原子接口、原子组件在微信客户端的执行环境是独立的，不同于小程序运行环境的，具体机制可参考运行机制
+
+调试指南
+开发接入需下载安装 微信开发者工具（Nightly Electron Build 最新版本)，具体开发调试过程操作指引请参考 调试指南
+
+最佳实践
+如何封装好 SKILL，使得小程序 AI 能够准确地识别用户意图，提供更好的用户体验，可参考最佳实践
+
+组件与 API 支持
+此模式下提供的接口能力，在用法上，基本与小程序环境下的保持一致。相比于小程序环境下的接口，此模式新增了若干特有 API，以及支持了原有的绝大部分内置组件与 API，具体可参考组件与 API 支持
+
+设计规范
+原子组件会渲染成 GUI 卡片，呈现在对话流上，作为微信原生界面的一部分，为了在设计风格融为一体，可参考设计规范
+
+示例 Demo
+我们提供一个使用了完整能力的示例 demo，可通过微信开发者工具打开，预览体验。
+
+注意：demo 代码的 appid 需改成在「微信公众平台 - 基础功能 - AI 能力」申请了「开发模式」的 appid
+
+
+接入方式
+小程序 AI 开发模式（以下简称此模式）提供了一套智能化的运行环境和开发框架，开发者可根据自身业务要求，参考本文档，将小程序的功能抽象为原子接口和原子组件，并封装成 SKILL，供小程序 AI 调用。
+
+一、全局提示词
+全局提示词可以用来整体说明此模式下提供的服务范围，提供相关的背景知识、行为逻辑和回答风格，引导小程序 AI 生成猜你想问的内容等等。
+
+另一方面，一个小程序可能存在多个 SKILLs，多个 SKILLs 的关联关系及相关介绍也可以在全局提示词上说明，以帮助模型选择合适的 SKILL 和原子接口来为用户提供服务。
+
+通常，全局提示词是一个名为 AGENTS.md 的文件，在小程序 AI 中，你可以这样指定它的路径：
+
+// app.json
+{
+  "agent": {
+    "skills": [],
+    "instruction": "path/to/AGENTS.md",
+  }
+}
+instruction 字段目前非必填，文件大小为最大 10000 字节。
+
+二、SKILL 声明
+一个小程序可声明多个 SKILLs，SKILL 必须封装在一个独立分包里，而一个独立分包可以放置多个 SKILLs，且需要全局开启按需注入 lazyCodeLoading。
+
+app.json 中增加 agent 字段，声明 SKILL 列表（agent.skills 字段），每个 SKILL 的字段说明如下：
+
+字段	必填	说明
+name	是	名称
+description	是	SKILL 简要说明
+path	是	SKILL 分包路径（绝对路径）
+// app.json
+{
+  "lazyCodeLoading": "requiredComponents",
+  "subPackages": [
+    {
+      "root": "path/to/pkg",
+      "independent": true,
+      "pages": []
+    }
+  ],
+  "agent": {
+    "skills": [
+      {
+        "name": "weather",
+        "description": "查询天气业务",
+        "path": "path/to/pkg/weather-skill"
+      },
+      {
+        "name": "shopping",
+        "description": "购物业务",
+        "path": "path/to/pkg/shopping-skill"
+      }
+    ]
+  }
+}
+目前一个小程序最多可以声明 30 个 SKILL。
+
+三、SKILL 封装
+SKILL 包含业务说明（SKILL.md）、模型可调用能力的声明（mcp.json）、原子接口（apis）与原子组件（components）的实现，其目录结构如下：
+
+文件	说明	固定目录结构
+SKILL.md	SKILL 的详细说明，只支持单文件，不支持引用其他 md 文件	是，最大长度 16000 字节
+index.js	注册当前 SKILL 所涉及的所有原子接口	是
+mcp.json	模型可调用能力的声明（当前 SKILL 所涉及的所有原子接口声明）	是，最大长度 24000 字节
+components/	当前 SKILL 所涉及的原子组件代码实现的所在目录	否，仅作为建议
+apis/	当前 SKILL 所涉及的原子接口代码实现的所在目录	否，仅作为建议
+目前计算 mcp.json 的长度时，会除去所有的 outputSchema 字段及空格、换行符后再计算。
+
+|-- path/to/pkg/weather-skill
+| |-- SKILL.md
+| |-- mcp.json
+| |-- components/
+| |-- apis/
+| |-- index.js
+3.1 模型可调用能力的声明
+mcp.json 包含所有原子接口的 Schema 声明，其中 componentPath 表示该原子接口返回的结果可由原子组件展示卡片。inputSchema 和 outputSchema 需遵循 JSON Schema 规范。
+
+属性	是否必填	说明
+name	是	标识符，跟 index.js 中导出的原子接口函数名一致
+description	是	原子接口的功能描述
+inputSchema	是	原子接口的入参，需为对象格式
+outputSchema	建议填	原子接口返回的 structuredContent对应的 schema
+_meta	否	可指定渲染的原子组件，componentPath 相对于 SKILL 目录，如 { "ui": { "componentPath": "path/to/comp" } }
+下面是只有一个 getWeather 的原子接口的声明示例：
+
+{
+  "apis": [
+    {
+      "name": "getWeather",
+      "description": "查询当前位置或某地的未来一段时间的天气",
+      "_meta": {
+        "ui": {
+          "componentPath": "path/to/comp"
+        }
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "location": {
+            "type": "string",
+            "description": "要查询天气的地点，如城市名、行政区名或经纬度。不传则默认取当前位置",
+          },
+          "days": {
+            "type": "number",
+            "description": "预报天数，范围1-15，默认7",
+          }
+        },
+        "required": [
+          "days"
+        ]
+      },
+      "outputSchema": {}
+    }
+  ]
+}
+处理图片/文件内容
+小程序 AI 的输入框支持了多模态上传，用户可以发送图片/文件给小程序 AI。如果需要处理用户上传的图片/文件，在原子接口的声明中，在 inputSchema 定义的字段中填写 "format": "image" | "file"`，小程序 AI 会调用相应的原子接口，并将接收到的图片/文件传给对应字段。
+
+{
+  "name": "EditPhoto",
+  "description": "帮用户 P 图",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "imagePath": {
+        "type": "string",
+        "description": "本地图片路径",
+        "format": "image"
+      },
+      "query": { "type": "string", "description": "用户的 P 图需求" }
+    },
+    "required": [ "imagePath", "query" ]
+  }
+}
+3.2 原子接口实现
+以原子接口 getWeather 为例，其返回值说明如下：
+
+属性	类型	必填
+isError	boolean	否，默认为 false
+content	ContentBlock[]	是，返回给 LLM 的文本内容，不超过 200 KB
+structuredContent	{ [key: string]: unknown }	否，返回给 LLM 的结构化数据，不超过 200 KB
+_meta	{ [key: string]: unknown }	否，对 LLM 不可见，可携带元数据，不超过 200 KB
+其中 isError、structuredContent、content 三个字段的数据是会作为 LLM 的上下文供 LLM 理解，而 _meta 内容对 LLM 不可见，用于携带私有数据，传递给原子组件。
+
+当 isError: true 时，将不进行 GUI 卡片渲染，structuredContent 将被忽略，content 常用于异常流程的引导。
+
+当 isError: false 时，且该原子接口有绑定原子组件，小程序 AI 将倾向于渲染 GUI 卡片，structuredContent 数据会传给原子组件用来渲染（便于模型理解 GUI 卡片的内容），content 用于后续流程引导。比如，如需强制出 GUI 卡片时，可在 content 里追加引导 ：「接下来为用户展示 XXX UI 卡片」。
+
+ContentBlock[] 目前只支持 TextContent，其定义如下：
+
+interface TextContent {
+  type: "text";
+  text: string;
+}
+下面是原子接口 getWeather 的代码实现示例：
+
+async function getWeather({ location, days }) {
+  // 原子接口内部实现，此处省略
+  return {
+    isError: false,
+    content: [{ type: "text", text: "已为您查询到北京未来3天天气" }],
+    structuredContent: {
+      location: "北京",
+      forecasts: [
+        { date: "2026-04-23", dayWeather: "晴", nightWeather: "晴", tempHigh: 28, tempLow: 14, wind: "北风2级" },
+        { date: "2026-04-24", dayWeather: "多云", nightWeather: "阴", tempHigh: 25, tempLow: 13, wind: "东南风3级" },
+        { date: "2026-04-25", dayWeather: "小雨", nightWeather: "中雨", tempHigh: 20, tempLow: 12, wind: "东风4级" }
+      ]
+    },
+  }
+}
+3.3 注册原子接口
+在 path/to/pkg/weather-skill/index.js 进行注册，当小程序 AI 发起原子接口调用时，就会在注册列表中找到原子接口的函数入口并执行：
+
+const getWeather = require('./apis/getWeather')
+
+const skill = wx.modelContext.createSkill('/path/to/pkg/weather-skill')
+// name 需与定义文件中的一致
+skill.registerAPI('getWeather', getWeather)
+中间件机制
+为了方便在多个原子接口同时处理一些公共逻辑，我们提供了原子接口中间件的机制，可用于统一登录态，统一上报和错误监听等场景。
+
+wx.modelContext.createSkill(skillPath: string) // 创建skill
+skill.use(Middleware) // 注册中间件
+skill.registerAPI(name, handler) // 注册原子接口，等同于 wx.modelContext.registerAPI('name', handler)
+interface MiddlewareContext {
+  name: string                  // 当前执行的原子接口名
+  skillPath: string             // 当前中间件执行时所在的skill
+  arguments: Record<string, any>  // 原子接口的入参
+}
+type Middleware = (ctx: MiddlewareContext, next: () => Promise<void>) => Promise<void>
+示例：
+
+const skill = wx.modelContext.createSkill('pages/weather')
+skill.registerAPI('getWeather', getWeather)
+skill.use(async (ctx, next) => {
+  // 1. 统一登录（仅首次）
+  const token = wx.getStorageSync('token')
+  if (!token) {
+    const { code } = await wx.login()
+    const res = await wx.request({ url: '...', data: { code } })
+    wx.setStorageSync('token', res.data.token)
+  }
+  // 2. 上报：记录开始时间
+  const start = Date.now()
+  try {
+    await next()  // 执行实际 handler
+    // 上报成功
+    reportLog({
+      name: ctx.name,
+      cost: Date.now() - start,
+    })
+  } catch (err) {
+    // 3. 统一错误监听
+    reportError({
+      name: ctx.name,
+      error: err,
+      cost: Date.now() - start,
+    })
+    throw e
+}) 
+核心语义：
+
+每次原子接口调用都会执行中间件
+next() 前原子接口调用的前置逻辑，next() 后是后置逻辑，try/catch 包裹可捕获错误
+整个中间件链与原子接口执行时间共享超时上限（当前为 300s）
+支持多个中间件：按注册顺序形成链，外层 -> 内层 -> handler -> 内层 -> 外层
+中间件函数为 async 类型，运行时 await 整个链路
+3.4 原子组件实现
+3.4.1 原子组件定义
+原子组件用于承接原子接口返回的结构化数据的展示。在编码上，其与小程序的自定义组件一致，不过需要注意的是，原子组件不可声明为虚拟组件。
+
+通过 wx.modelContext.getContext / getViewContext 获取原子组件渲染时需要的尺寸、数据等信息。
+
+Component({
+  lifetimes: {
+    created() {
+      const modelCtx = wx.modelContext.getContext(this);
+      const { NotificationType } = wx.modelContext;
+      modelCtx.on(NotificationType.Input, (data) => {
+        // 原子接口的入参数据
+      });
+      modelCtx.on(NotificationType.Result, (data) => {
+        // 原子接口的出参数据
+      });
+
+      const viewCtx = wx.modelContext.getViewContext(this);
+      const { minHeight, maxHeight, width } = viewCtx.getDimensions();
+      viewCtx.on(NotificationType.Overflow, (data) => {
+        // data.contentHeight: 内容总高
+        // data.overflowHeight: 溢出高度
+        // data.maxHeihgt: 当前卡片容器的硬性阈值
+        // 如果给原子组件的 root element 设置 maxHeight 和 overflow: hidden 则无法触发
+      });
+    }
+  }
+})
+3.4.2 关联小程序页面（必须）
+原子组件渲染出来的 GUI 卡片上方有个标题栏，其右上方提供进入小程序的入口，该入口需配置与原子组件关联的小程序页面，是必填项。通过此方式进入小程序的场景值为 1442 或 1443。
+
+
+实现上，分为两步：
+
+1、在 mcp.json 声明原子组件所对应的小程序页面的完整 path（固定 path）：
+
+{
+  "apis": [],
+  "components": [
+    {
+      "path": "path/to/comp",
+      "relatedPage": "/path/to/related-page"
+    }
+  ]
+}
+2、在原子组件渲染时，动态设置页面的 query 参数：
+
+Component({
+  lifetimes: {
+    created() {
+      const modelCtx = wx.modelContext.getContext(this)
+      this._viewCtx = wx.modelContext.getViewContext(this)
+
+      modelCtx.on('result', (data) => {
+        const { orderId } = data.result.structuredContent
+        this.setData({ orderId })
+        // 若只传 query，路径由 mcp.json 中的 components[].relatedPage 决定
+        this._viewCtx.setRelatedPage({ query: `orderId=${orderId}` })
+        // 若原子组件可能与多个小程序页面关联，也可传入 path 参数
+        this._viewCtx.setRelatedPage({ path: '', query: `orderId=${orderId}` })
+      })
+    }
+  },
+  methods: {
+    onSpecChange(e) {
+      const spec = e.detail.value
+      this.setData({ selectedSpec: spec })
+      // 状态变化后更新 query 参数
+      this._viewCtx.setRelatedPage({
+        query: `orderId=${this.data.orderId}&spec=${spec}`
+      })
+    }
+  }
+})
+3.4.3 原子组件的约束
+原子组件的运行环境与原子接口隔离，处于不同的上下文中，其可调用的接口能力也与原子接口有所不同。
+
+原子组件存在以下特性与限制：
+
+原子组件的渲染区域有限，其宽度随屏幕宽度变化，其最小高度是宽高比 4:1，最大高度是宽高比 1:1，不超出最小最大高度时，随内容自动撑高
+初始化时决定卡片高度，后续不可再改变高度
+仅支持 tap 点击、Image load、image error 事件，不支持其他交互事件
+默认不支持网络请求和云开发接口，需声明为「实时动态组件」
+默认不支持定时器接口，如 setTimeout、setInterval，需声明为「实时动态组件」
+不支持打开小程序接口
+不支持动画
+禁止上下滚动（即禁止使用 overflow-y）
+支持点击后帮用户上行一条文本消息（ModelContext.sendFollowUpMessage），效果等同于用户语音发送一条文本消息
+支持点击后打开半屏页面（见下节）
+3.4.4 实时动态组件
+对于需要展示实时动态内容的合理的场景，可在 mcp.json 声明需要实时动态能力（支持 wx.request、定时器等接口）
+
+注意：此能力需要单独审核（正常提审即可），请声明使用场景，非必要场景不建议使用
+
+{
+  "apis": [],
+  "components": [
+    {
+      "path": "path/to/comp",
+      "permissions": {
+        "scope.dynamic": {
+          "desc": "声明使用场景"
+        }
+      }
+    }
+  ]
+}
+3.4.5 原子组件过期态
+支持通过接口形式，将已经渲染出来的原子组件置为过期态，防止用户再次点击。
+
+
+1、组件过期声明
+
+在 mcp.json 的 components 字段下声明：
+
+字段	类型	必填	说明
+path	string	是	组件路径（相对于 skill 目录）
+expirable	boolean	否	声明该组件渲染的卡片是否可被过期，默认 false
+expiredText	string	否	过期后显示的文案，默认 “服务已过期”
+{
+  "apis": [
+    {
+      "name": "searchRides",
+      "description": "搜索打车方案",
+      "_meta": { "ui": { "componentPath": "components/ride-card/index" } },
+      "inputSchema": { ... }
+    }
+  ],
+  "components": [
+    {
+      "path": "components/ride-card/index",
+      "expirable": true,
+      "expiredText": "店铺已关闭"
+    }
+  ]
+}
+2、组件过期接口
+
+提供两种粒度的过期 API：
+
+方式一：wx.modelContext.expireAllCards()
+
+wx.modelContext.expireAllCards(): Promise<{ errMsg: string }>
+可在原子接口/组件里调用。所有声明了 expirable: true 的组件（包括自身），将被标记为过期并渲染蒙层。
+
+同时支持按 componentPath 过滤，使所有相同的 componentPath 的原子组件或最近一个特定的 componentPath 的原子组件过期：
+
+// 过期特定组件的卡片（绝对路径）
+wx.modelContext.expireAllCards({
+  componentPaths: ['packageA/weather-skill/components/weather-card/index']
+})
+
+// 只过期最近一张匹配的卡片
+wx.modelContext.expireAllCards({
+  componentPaths: ['packageA/weather-skill/components/weather-card/index'],
+  match: 'latest'
+})
+方式二：wx.modelContext.getViewContext(this).expirePreviousCards()
+
+const viewCtx = wx.modelContext.getViewContext(this)
+viewCtx.expirePreviousCards(): Promise<{ errMsg: string }>
+只能在原子组件里调用，之前渲染过的原子组件，声明了 expirable: true 的将被标记为过期并渲染蒙层。
+
+同时支持按 componentPath 过滤，使所有相同的 componentPath 的原子组件或最近一个特定的 componentPath 的原子组件过期：
+
+// 过期特定组件的卡片（绝对路径）
+viewCtx.expirePreviousCards({
+  componentPaths: ['packageA/weather-skill/components/weather-card/index']
+})
+
+// 只过期最近一张匹配的卡片
+viewCtx.expirePreviousCards({
+  componentPaths: ['packageA/weather-skill/components/weather-card/index'],
+  match: 'latest'
+})
+3、组件过期事件
+
+原子组件被置为过期时，会收到过期事件，此时原子组件内部可以做一些必要的清理。
+
+Component({
+  lifetimes: {
+    created() {
+      const { NotificationType } = wx.modelContext;
+      const viewCtx = wx.modelContext.getViewContext(this);
+
+      viewCtx.on(NotificationType.Expire, (event) => {
+        console.log('卡片已过期', event.expiredText)
+        // 停止轮询、禁用按钮等清理逻辑
+      })
+    }
+  }
+})
+3.5 半屏页面
+半屏页面是原子组件内容的延伸，是个非必要流程，只有当需要展示更多详情信息，或者需要用户补充信息时，才使用半屏页面能力，通过点击原子组件上的某个按钮打开半屏页面。
+
+半屏页面的环境可以认为是与小程序的环境一致，可以用已有的小程序页面来加载，但不允许任何跳转，包括所有跳出半屏的接口、页面路由接口、广告相关接口组件。
+
+当用户需要进行下一步时，应是点击半屏里的某个按钮，触发上行一段文本消息，此时会同时关闭半屏页面回到小程序 AI 界面，小程序 AI 继续处理新的用户请求。
+
+注：半屏打开小程序页面的场景值为 1433 或 1434
+
+注：通过 wx.getDetailPageCloseButtonBoundingClientRect 接口适配左上角关闭按钮
+
+3.5.1 半屏页面实现
+在原子组件内，响应点击并打开半屏页面（原子接口内不可调用）：
+
+<view> xxx </view>
+<view bind:tap="showDetail">查看未来 15 天的天气</view>
+Component({
+  lifetimes: {
+    created() {
+    }
+  },
+  methods: {
+    showDetail() {
+      const viewCtx = wx.modelContext.getViewContext(this);
+      viewCtx.openDetailPage({
+        url: '/packageA/pages/weather-detail?foo=bar'
+      })
+    }
+  }
+})
+在半屏页面中，代用户上行一条文本消息（同时会关闭半屏页面）：
+
+注意：需要以用户第一人称的角度来发送这条消息
+
+Page({
+  onTap() {
+    const ctx = wx.modelContext.getContext()
+    ctx.sendFollowUpMessage({
+      content: [
+        {
+          // 必须传
+          type: 'text',
+          text: '选择拿铁'
+        },
+        {
+          // 指定下一步应该调用哪个原子接口，若不传，则由模型推理
+          type: 'api/call',
+          data: {
+            name: 'selectGoods',
+            arguments: {}
+          }
+        }
+      ]
+    })
+  }
+})
+若半屏页面是 web-view 加载的 h5 页面，则上行文本消息的方式是：
+
+// 前置 wx.config()
+wx.ready(function () {
+    WeixinJSBridge.invoke('invokeMiniProgramAPI', {
+      name: 'sendFollowUpMessage',
+      arg: {
+        content: [
+          {
+            // 必须传
+            type: 'text',
+            text: '选择拿铁'
+          },
+          {
+            // 指定下一步应该调用哪个原子接口，若不传，则由模型推理
+            type: 'api/call',
+            data: {
+              name: 'selectGoods',
+              arguments: {}
+            }
+          }
+        ]
+      }
+    }, function (res) {})
+})
+3.5.2 半屏页面的约束
+半屏页面的执行环境与小程序页面一致，但可调用的接口能力有所不同。半屏页面存在以下限制：
+
+所有跳出半屏去往公众号、视频号、其他小程序、表情、问一问、地图 App 的接口
+所有页面路由接口
+所有广告相关的接口组件
+3.5.3 半屏页面预加载
+为了给用户提供更好的体验，我们提供了预加载半屏页面的能力，若当前原子组件存在调用拉起半屏页面的逻辑，开发者可以在原子组件创建后调用 preloadDetailPage
+
+Component({
+  lifetimes: {
+    attached() {
+      const viewCtx = wx.modelContext.getViewContext(this);
+      viewCtx.preloadDetailPage({
+        url: '/packageA/pages/weather-detail?foo=bar'
+      })
+    }
+  },
+})
+四、通过文字链拉起小程序
+小程序 AI 可以在回复用户的文本消息中带上小程序短链，供用户点击打开小程序页面。
+
+该能力需要开发者提供页面元数据，小程序 AI 将根据用户问答的上下文，在必要的时候生成小程序短链发送给用户。短链上的文本由模型根据聊天上下文、页面 name、页面 description、页面 query 来动态生成。通过此方式进入小程序的场景值为 1435 或1436。
+
+注意：通过文字链拉起小程序为兜底策略，原则上用户流程需在小程序 AI 内闭环，核心功能使用文字链可能会影响审核或触发召回降权，建议开发者谨慎使用。
+
+页面元数据定义
+
+app.json 里增加 pageMetadata 字段
+
+// app.json
+{
+  "agent": {
+    "skills": [],
+    "pageMetadata": "path/to/page-meta.json",
+  }
+}
+page-meta.json 中定义了页面的功能和所需 query。 query 为一个标准的 object 格式 JSON-Schema。
+
+字段	必填	功能
+path	是	页面路径，可带固定的 query 信息
+name	是	页面标题
+description	是	页面的功能描述
+query	否	页面 query
+// page-meta.json
+{
+  "pages": [
+    {
+      "path": "pages/home/home",
+      "name": "首页",
+      "description": "展示最新的内容和推荐"
+    },
+    {
+      "path": "pages/detail/detail",
+      "name": "商品详情",
+      "description": "展示特定商品的信息",
+      "query": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "商品的唯一标识符"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      }
+    }
+  ]
+}
+目前 page-meta.json 的最大长度为 8000 字节。
+
+五、小程序与小程序 AI 交互
+我们提供了一些能力，方便在小程序环境下能与小程序 AI 进行交互
+
+1、打开小程序 AI 界面
+现有的小程序页面内可通过 wx.openAgent 接口打开小程序 AI 界面，支持以下参数：
+
+参数	类型	说明
+followUpMessage	string	自动帮用户上行一条文本消息（支持中）
+context	string	可携带当前页面上下文，便于模型理解以响应用户询问
+当用户从胶囊入口打开小程序 AI 界面时，会触发 wx.onAgentOpen 事件，事件回调里返回数据，同样能实现帮用户上行一条文本消息以及携带当前页面上下文：
+
+function callback() {
+  return { followUpMessage, context }
+}
+wx.onAgentOpen(callback)
+wx.offAgentOpen(callback)
+同时，为了更好的兼容，我们提供了 wx.checkIsSupportAgent() 接口，判断当前设备/用户支持打开小程序 AI 界面，再调用 wx.openAgent()
+
+wx.checkIsSupportAgent({
+  success(res) {
+    if (res.isSupport) wx.openAgent()
+  }
+})
+2、返回小程序 AI 界面
+当用户通过「文字链」或者「卡片右上角的关联页面入口」进入小程序后，小程序可通过 wx.navigateBackAgent 返回小程序 AI 界面，可携带数据给到模型，让小程序 AI 继续完成用户的意图。该接口支持以下参数：
+
+参数	类型	说明
+followUpMessage	object	自动帮用户上行一条文本消息，可携带 api/call
+context	string	可携带当前页面上下文，便于模型理解以响应用户询问
+wx.navigateBackAgent({
+  followUpMessage: {
+    content: [
+      {
+        // 必须传
+        type: 'text',
+        text: '选择拿铁'
+      },
+      {
+        // 指定下一步应该调用哪个原子接口，若不传，则由模型推理
+        type: 'api/call',
+        data: {
+          name: 'selectGoods',
+          arguments: {} // 长度限制 1000 个字符
+        }
+      }
+    ]
+  },
+  context: '',
+})
+
+
+运行机制
+小程序 AI 开发模式的运行机制涉及客户端运行时、小程序 AI 后台、第三方服务之间的交互，各自的职责如下：
+
+客户端运行时：由微信客户端提供的独立代码运行环境，用来执行开发者提供的原子接口，渲染原子组件为用户展示 GUI 卡片
+小程序 AI 后台：小程序 AI 后台会根据开发者封装的 SKILLs，结合用户的请求，发起必要的原子接口调用或渲染原子组件的指令
+第三方服务：开发者在原子接口的实现中，调用自身的服务完成数据交互，并返回必要的数据给到小程序 AI，供小程序 AI 理解及完成用户的请求
+微信客户端与小程序 AI 后台基于小程序 MCP 完成交互，开发者无需理解交互协议细节，只需要按框架设计提供完整的 SKILL 实现，小程序 AI 就能正确地推理及执行相应的原子接口。
+
+运行环境
+开发者提供的原子接口和原子组件是在微信客户端创建的一个独立环境中运行，该环境与小程序的运行环境不同。
+
+脚本执行环境
+脚本执行环境是由 JavaScriptCore / V8 引擎创建的新的独立环境，需要特别留意的是，原子接口、原子组件、实时动态原子组件分别在该 JavaScript 环境中三个不同的执行上下文中运行，拥有不同的接口权限集。
+
+不同的 JavaScript 执行上下文不共享全局变量
+
+此外，打开半屏页面的能力中，半屏页面的运行环境与小程序的运行环境完全一致，区别在于，半屏页面的环境下，部分组件/接口能力有所受限。
+
+渲染环境
+原子组件是使用微信小程序团队自研的卡片渲染引擎进行渲染，组件框架采用 glass-easel 框架。在编码上，与小程序的自定义组件一致，需要留意的是，WXSS 样式集与小程序的 WebView / Skyline 引擎有所差异，具体支持的特性见底部附录。
+
+生命周期
+当用户与小程序 AI 开始对话时，我们会起一个新的会话来承载，用户在该会话的聊天记录会一直对用户与小程序 AI 可见，直到客户端运行时结束，会话终止，下一次用户重新进入会是一个全新的会话。
+
+客户端运行时有以下几种情况会结束：
+
+小程序 AI 退至后台 30 分钟后（与小程序后台保活时长一致），微信客户端会主动结束客户端运行时
+小程序 AI 退至后台后，由于系统内存告警，微信客户端可能会清理客户端运行时
+用户重新启动小程序 AI
+交互流程
+以一个简化的场景为例，交互流程如下所示
+
+小程序 AI 后台
+
+客户端运行时
+
+第三方服务
+
+上行消息
+
+下发接口调用
+
+回传结果
+
+上行消息：确认支付
+
+下发接口调用
+
+请求支付参数
+
+返回支付参数
+
+查询支付状态
+
+回传结果
+
+创建订单
+
+创建预支付订单
+
+查询支付状态
+
+点一杯 WeStore 拿铁，少糖
+
+启动运行环境，下载分包
+
+执行原子接口代码
+通过 wx.login 获取用户身份
+
+收到数据，返回订单信息
+
+渲染原子组件，展示订单
+
+用户点击「确认支付」
+
+执行原子接口代码
+
+调用 wx.requestPayment
+拉起微信支付收银台
+
+收到数据，返回支付状态
+
+渲染原子组件，展示支付结果
+
+加载 SKILL
+
+LLM 推理：
+调用原子接口 confirmOrder
+
+LLM 推理：
+下发渲染指令
+
+LLM 推理：
+调用原子接口 payOrder
+
+LLM 推理：
+下发渲染指令
+
+附录
+WXSS 语法支持范围
+1. 选择器支持
+出于性能考虑，仅支持少量 CSS 选择器：
+
+类选择器 .my-class {}；
+ID 选择器 #my-id {}；
+标签名选择器 view {}；
+后代选择器（空格分隔）。
+以上选择器可以按照 CSS 规范来组合，例如：
+
+view#my-id.my-class .another-class {
+  display: block;
+}
+也可以用逗号 , 来让多个选择器共享一组样式，例如：
+
+.my-class, #my-id {
+  display: block;
+}
+需要注意的是，类选择器编写的样式具有独特的优化，因而推荐尽可能使用类选择器来编写样式。
+
+2. 媒体查询
+CSS Media Queries 媒体查询语法是受支持的，例如：
+
+@media (max-width: 360px) {
+  .my-class {
+    display: block;
+  }
+}
+支持的判断条件见下表。
+
+判断条件	值类型	说明
+orientation	string	landscape 表示宽大于高，portrait 宽不大于高
+width	number	宽度精确值
+min-width	number	宽度下限
+max-width	number	宽度上限
+height	number	高度精确值
+min-height	number	高度下限
+max-height	number	高度上限
+prefers-color-scheme	string	当前环境主题，通常是 light 或 dark
+此外，not 和 and 关键字也受支持；基本媒体类型仅有 all screen 两种，因而通常并不需要写明。
+
+3. 尺度单位
+在表达长度时，支持以下绝对长度单位：
+
+像素（逻辑像素）px；
+相对于显示区域宽度的百分点 vw；
+相对于屏幕宽度的 750 分点 rpx（非 CSS 标准）。
+相对于字体的长度单位 em 和 rem 也可以使用，但有以下注意事项。
+
+rem 是相对于根节点的字体尺寸，但目前还不能指定根节点的字体尺寸。
+em 是当前节点的字体尺寸。但如果一个 em 的值是从父节点继承的，在 lib v5.x 上它是相对于当前节点的字体尺寸，而 lib v6.x 上它是相对于父节点的字体尺寸。
+4. env
+在表达长度时，可以使用几个环境值，例如：
+
+.my-class {
+  margin-top: env(safe-area-inset-top);
+}
+可用的环境值见下表。
+
+环境值	类型	说明
+safe-area-inset-left	长度	安全区左侧距离
+safe-area-inset-top	长度	安全区顶部距离
+safe-area-inset-right	长度	安全区右侧距离
+safe-area-inset-bottom	长度	安全区底部距离
+5. calc
+在表达长度时，可以使用 calc() 函数，例如：
+
+.my-class {
+  margin-top: calc(env(safe-area-inset-top) + 10px);
+}
+6. 字体定义
+支持通过 CSS 加载自定义字体。但目前高级语法受到一定限制，仅能使用基础语法，例如：
+
+@font-face {
+  font-family: "my-font";
+  src: url("https://example.com/path/to/font.ttf");
+}
+WXSS 属性支持范围
+1. 基础定位
+属性	默认值	有效值	备注
+display	inline	none inline inline-block block flex	
+position	static	relative absolute	static 视为 relative
+box-sizing	content-box	content-box padding-box border-box	
+2. 可点击性
+属性	默认值	有效值	备注
+pointer-events	auto	auto none	
+3. 颜色与可见性
+属性	默认值	有效值	备注
+color	transparent	任何 CSS 标准色值	
+opacity	1	0 ~ 1 之间数值	
+visibility	visible	visible hidden	
+4. flex 布局
+属性	默认值	有效值
+flex-direction	row	row column
+flex-wrap	no-wrap	no-wrap wrap wrap-reverse
+align-items	stretch	stretch normal center flex-start flex-end baseline
+align-self	stretch	auto stretch normal center flex-start flex-end baseline
+align-content	stretch	stretch normal center flex-start flex-end baseline
+justify-content	flex-start	center flex-start flex-end space-between space-around space-evenly
+flex-grow	0	非负数值
+flex-shrink	1	非负数值
+flex-basis	auto	尺度
+aspect-ratio	auto	[WIDTH] / [HEIGHT]
+flex 组合属性也受支持。
+
+5. 背景
+属性	默认值	有效值	备注
+background-color	transparent	任何 CSS 标准色值或 current-color	
+background-image		url(...) 或 linear-gradient(...)	可多个
+background-size	auto	cover contain 或至多两个尺度、百分比	可多个
+background-repeat	repeat	repeat no-repeat repeat-x repeat-y space round	可多个
+background-origin	border-box	border-box padding-box content-box	可多个
+background-clip	border-box	border-box padding-box content-box	可多个
+background-position	0% 0%	横向、纵向相对位置和尺度、百分比	可多个
+background-position-x	0%	横向相对位置和尺度、百分比	可多个
+background-position-y	0%	纵向相对位置和尺度、百分比	可多个
+background 组合属性也受支持。
+
+6. 遮罩
+属性	默认值	有效值	备注
+mask-image		url(...) 或 linear-gradient(...)	可多个
+mask-size	auto	cover contain 或至多两个尺度、百分比	可多个
+mask-repeat	no-repeat	repeat no-repeat repeat-x repeat-y space round	可多个
+mask-origin	border-box	border-box padding-box content-box	可多个
+mask-clip	border-box	border-box padding-box content-box	可多个
+mask-position	0% 0%	横向、纵向相对位置和尺度、百分比	可多个
+mask-mode	match-source	alpha	match-source 视为 alpha，可多个
+mask 组合属性也受支持。
+
+7. 基础尺寸和位置
+属性	默认值	有效值	备注
+width	auto	尺度、百分比	
+height	auto	尺度、百分比	
+min-width	auto	尺度、百分比	
+min-height	auto	尺度、百分比	
+max-width	auto	尺度、百分比	
+max-height	auto	尺度、百分比	
+left	auto	尺度、百分比	
+right	auto	尺度、百分比	
+top	auto	尺度、百分比	
+bottom	auto	尺度、百分比	
+8. 边距和留白
+属性	默认值	有效值	备注
+padding-left	0	尺度、百分比	
+padding-right	0	尺度、百分比	
+padding-top	0	尺度、百分比	
+padding-bottom	0	尺度、百分比	
+margin-left	0	尺度、百分比	
+margin-right	0	尺度、百分比	
+margin-top	0	尺度、百分比	
+margin-bottom	0	尺度、百分比	
+padding / margin 组合属性也受支持。
+
+9. 边线
+属性	默认值	有效值	备注
+border-left-width	0	尺度、百分比	
+border-left-style	none	none solid	
+border-left-color	transparent	任何 CSS 标准色值或 current-color	
+border-top-width	0	尺度、百分比	
+border-top-style	none	none solid	
+border-top-color	transparent	任何 CSS 标准色值或 current-color	
+border-right-width	0	尺度、百分比	
+border-right-style	none	none solid	
+border-right-color	transparent	任何 CSS 标准色值或 current-color	
+border-bottom-width	0	尺度、百分比	
+border-bottom-style	none	none solid	
+border-bottom-color	transparent	任何 CSS 标准色值或 current-color	
+border / border-left / border-top / border-right / border-bottom 组合属性也受支持。各边线颜色不同时，采取类似于 CSS 的斜线分界。
+
+10. 圆角
+属性	默认值	有效值	备注
+border-top-left-radius	0	尺度、百分比	
+border-top-right-radius	0	尺度、百分比	
+border-bottom-left-radius	0	尺度、百分比	
+border-bottom-right-radius	0	尺度、百分比	
+border-radius 组合属性也受支持。
+
+11. 阴影
+属性	默认值	有效值	备注
+box-shadow	none	偏移、扩散尺度、任何 CSS 标准色值或 current-color、可选的 inset	可多个
+text-shadow	none	偏移、扩散尺度、任何 CSS 标准色值或 current-color	可多个
+12. 文本排版
+属性	默认值	有效值	备注
+font-size	auto	尺度、百分比	
+line-height	auto	正数、尺度、百分比	
+text-align	left	left center right justify justify-all	
+font-weight	normal	normal bold bolder lighter 或正整数	
+word-break	break-word	break-word break-all	
+white-space	normal	normal nowrap pre pre-wrap pre-line	
+text-overflow	clip	clip ellipsis	
+text-indent	0	尺度、百分比	
+vertical-align	baseline	baseline top middle bottom text-top text-bottom	
+letter-spacing	normal	normal 或尺度、百分比	
+word-spacing	normal	normal 或尺度、百分比	
+font-family	sans-serif	sans-serif serif monospace cursive fantasy system-ui 或字体名	可多个
+font-style	normal	normal italic	
+-wx-line-clamp	none	none 或正整数	
+font 组合属性也受支持。
+
+13. 变换
+属性	默认值	有效值	备注
+transform	none	CSS transform 表达式	
+transform-origin	50% 50% 0	横向、纵向相对位置和尺度、百分比	
+filter		blur(...)	
+调试指南
+一、使用开发者工具
+下载安装 微信开发者工具（Nightly Electron Build 最新版本)
+
+在「编译模式」入口切换到「小程序 AI 编译」，调试基础库切到 3.16.1
+
+
+如果进入项目窗口发现看不到 “小程序 AI 编译”，确保在「微信公众平台 - 基础功能 - AI 能力」申请通过了「开发模式」，若已开通，可尝试通过重新登录 / 重新打开项目窗口的方式重试。
+若流程跑不通，尝试将调试基础库切到其他版本，再切回 3.16.1（触发重新下载资源）
+在该编译模式下，支持：
+
+对单个 SKILL 调试，可切换 SKILL
+对单个原子接口调试，可切换原子接口，可手动填入参数
+对单个原子组件调试，可手动填入参数，可调整组件宽度以适配最小/最大高度
+完整的对话交互流程，可单步调试，直观地看到原子接口的入参与出参
+开发者工具执行异常反馈：帮助 -> 上传工具日志，并提供微信号和复现的时间点
+
+
+二、真机预览与调试
+微信客户端支持真机预览体验，需要将微信更新至 8.0.74 及以上（目前仅 iOS 支持），并确保基础库版本是 3.16.1 及以上。
+
+预览调试：扫描开发者工具预览的二维码，打开开发版小程序后，在右上角胶囊可以看到「小程序 AI 开发模式」入口，进去即可体验并测试流程，支持胶囊右上角菜单「打开调试」开启 vConsole 进行调试。
+
+真机预览调试，非开发者工具上的「真机调试」远程调试功能，该功能暂不支持。
+
+通过以下方法确认基础库版本号：
+
+打开小程序右上角菜单 -> 打开调试 -> 展开 vConsole -> 切至 WeChat 页
+
+
+问题反馈：在开发者社区「小程序 AI 能力」主页发贴反馈问题，为提升问题排查效率，需提供微信号、复现的时间点，并截个屏及上传客户端日志，日志上传入口：微信“我” -> 设置 -> 帮助与反馈 -> 右上角小扳手-> 上传日志 -> 上传最近一小时日志（或在复现时间点附近最小时间范围的日志）
+
+三、开发辅助
+3.1 生成辅助
+为了帮助开发者接入，我们将提供一套自动生成与循环验证的系统，核心思路是：基于小程序源码，利用 LLM 自动生成原子接口和原子组件，并通过运行环境验证形成闭环，不断迭代直至达到质量标准。
+
+建议一次只生成一小部分业务逻辑对应的原子服务，校验没问题后，再生成其他部分的逻辑。
+
+3.1.1 安装「生成 Skills」（wxa-skills-generate）
+可便捷的基于原有业务代码生成原子接口与原子组件, 可以自由地选择顺手的 Coding Agent（如 CodeBuddy、Claude Code）进行生成，只需要输入 「帮我分析这个项目，接入微信小程序 AI 开发模式」就可以激活「生成 skills」进入生成流程，按照模型的提示，提供信息便可生成对应的原子接口与原子组件。
+
+强烈建议生成后用下方「校验 Skills」进行校验，便于发现 Coding Agent 生成的代码的异常问题
+
+3.1.2 安装「校验 Skills」 (wxa-skills-validate)
+可基于开发者工具的渲染与执行能力，验证上轮命令中生成的代码，模型会依据真实的运行结果闭环迭代生成原子组件与原子接口（运行过程中开发者工具可能会有对应的授权弹窗，需手动进行授权，未授权可能会导致原子接口执行失败），任务完成后会输出 DELIVERY.md 阐述。
+
+在使用「校验 Skills」前，必须在微信开发者工具上进行设置：手动打开工具 -> 设置 -> 安全设置，将服务端口开启。
+
+3.2 评测辅助
+在基础接入与生成辅助能力之外，开发者实际开发时常会遇到表现不符合预期的问题，且调试成本较高。为此，我们提供「评测 Skills」，帮助开发者自动生成评测报告与优化建议，降低排查难度，提升调优效率。
+
+在使用「评测 Skills」前，必须在微信开发者工具上进行设置：手动打开工具 -> 设置 -> 安全设置，将服务端口开启。
+
+安装「评测 Skills」（wxa-skills-eval）
+填写用于评测的模型配置后，告知开发者工具路径以及小程序项目目录，可便捷的基于已生成完的原子接口、原子组件，模拟用户对话进行效果评测，自动分析存在的问题，提供优化建议。任务完成后会输出评测报告，eval_report.html 展示评测信息。
+
+详细指引，可参考评测指南
+
+最佳实践
+为了达到更好的用户体验，我们提供了一些最佳实践，从产品设计和 SKILL 封装两个方面展开。
+
+一、产品设计
+以下以 WeStoreCafe 点单 SKILL 为参考案例，梳理此模式下的核心设计点：
+
+对话承接用户的模糊意图：当用户表达"想喝点清爽的""最近有什么推荐"这类非结构化需求时，由 AI 完成理解和推荐，再引导至原子组件完成确认和下单。
+
+可通过自然语言修改内容：用户无需跳出对话，可直接对话修改如规格、时间、地点等枚举值或明确实体的字段内容。
+
+历史数据与个人资产可查询、可操作：高频消费场景下的核心诉求是效率，"再来一杯上次喝的""用积分兑换一张优惠券"这类指令可被执行，能提升使用效率。
+
+服务进程动态实时更新：订单或服务原子组件随状态推进动态更新，而非静态展示，防止用户错过关键更新。
+
+二、SKILL 封装
+1、信息源与分工
+小程序 AI 在决定调用哪个原子接口、生成什么参数、回复什么内容时，会综合多个上下文信息源做判断。这些信息源在权重和职责上各有侧重，写在错误的位置会显著降低准确率。
+
+1.1 注意力权重
+信息源	注意力	说明
+原子接口返回的 content	★★★★★	离当前决策点最近，模型会把它当作“事实 + 动作”读取（参见 4.2）。这里出现错误话术，会让模型偏离 SKILL.md 的约定
+原子接口声明（mcp.json）里的 description	★★★★	影响模型“选不选这个接口”，写得模糊时模型容易选错
+原子接口声明（mcp.json）里的 inputSchema.description	★★★★	影响模型“怎么填参数”，是字段级约束的核心位置，比写在 SKILL.md 长文里更有效
+SKILL.md	★★★	适合写业务流程编排、跨接口规则、意图分流、通用规范
+1.2 内容分工
+信息源	写什么
+原子接口返回的 content	本次调用结果与下一步动作
+原子接口声明里的 description	接口本身的功能、调用时机、不适用场景
+原子接口声明里的 inputSchema.description	参数语义、取值来源、缺省处理
+SKILL.md	业务流程编排、跨接口规则、意图分流、通用规范
+1.3 常见错位
+把“接口本身的功能”写到 SKILL.md：长文膨胀、与 mcp.json 易不一致。SKILL.md 中的接口清单只写“前置条件 + 上下游关系”。
+把“跨多接口的业务规则”写到单个接口的 description：仅在调用该接口时生效，其他接口决策时模型读不到。应写在 SKILL.md。
+把“接口功能描述”写到 content：content 只承载本次调用结果与下一步动作，功能描述属于 description。
+2、通用写作原则
+适用于上述所有信息源。
+
+同一约束在一处书写。重复书写容易因措辞不一致引发冲突。
+硬约束放在权重更高的位置。能在代码层面基于规则强校验的约束，优先做代码校验。
+给出可执行出口。只写“不要做 X”而不写“应做什么”，模型会缺少出口。每条禁令都应配一个明确的替代动作。
+3、原子接口声明（mcp.json）
+3.1 接口 description
+接口名使用语义化名称。searchDrinks 优于 search。
+首句声明「业务对象」，而非「入参」。
+反例：“按关键词、温度、杯型搜索商品列表（仅饮品）……” —— 首句强调入参，且“商品”语义过宽，模型可能误命中其他商品类目。
+推荐：“搜索饮品。按关键词、温度、杯型检索……” —— 首句先点明业务对象，再描述入参维度。
+不写内部实现细节。实现具体细节对模型选择接口没有帮助，会挤占真正重要的“使用边界”信息。
+职责单一，描述互不重叠。接口之间避免包含关系；描述面向模型而非用户，措辞简洁即可。
+同名字段统一命名。同一含义的字段在不同接口保持一致，例如饮品 ID 始终用 drinkId，不要混用 itemId。
+3.2 字段 description
+入参字段选取：优先传 ID 而非自然语言，例如门店传 storeId 而非省市街道，饮品传 drinkId 而非饮品名称、类目。模型不必再从自然语言中反复提取和匹配，参数歧义更少，推理也更快、更稳。
+
+description 书写：以下给出两类典型字段的写法示例。
+
+普通字段：举例时给多个不同样本（避免被当默认值），并配明确的缺省处理。单一举例容易被模型当作"标准答案"——用户只说“想喝点什么”时，可能直接照搬该例子填入。
+
+// 反例：只举一个例子，且未说明缺省处理
+"keyword": { "description": "饮品关键词，如『拿铁』" }
+
+// 推荐：多样化举例 + 缺省处理
+"keyword": {
+  "description": "饮品关键词，例如『拿铁』『美式』『奶茶』。用户未说出具体饮品时，不要填写本字段，应改走饮品推荐接口。"
+}
+ID 类字段：声明取值来源接口。业务 ID 容易被按格式凑出，需在 description 中显式声明来源。
+
+// 反例
+"drinkId": { "description": "饮品 ID" }
+
+// 推荐
+"drinkId": {
+  "description": "饮品唯一标识，取自上游接口 searchDrinks 或 getRecommendedDrinks 返回的 drinkId 原值。不要从用户自然语言（如『那个拿铁』）推断，也不要使用示例值。上下文无可用 drinkId 时，应先调 searchDrinks。"
+}
+四、原子接口返回 content
+content 直接面向小程序 AI，承载本次调用结果并约束下一步动作。
+
+4.1 通用规则
+输入校验
+
+小程序 AI 生成的参数不保证正确，原子接口需校验类型与有效性（如 drinkId 是否存在）。
+返回内容
+
+structuredContent 与 content 都会提供给小程序 AI：前者承载结构化数据（卡片展示内容），后者承载结果说明与决策约束，两者避免重复。
+渲染需要但小程序 AI 无需理解的内容（如图片地址、后台冗余字段）通过 _meta 传递。
+错误处理
+
+返回明确的错误原因与下一步指引：
+缺信息：“缺少收货地址，需用户补充”；
+无结果：“未找到相关饮品，可换关键词重试”。
+4.2 事实 + 动作两段式
+content 应先陈述本次返回的客观状态，再给出下一步动作。仅有动作没有事实时，模型可能把"展示卡片"理解为"准备调下一步接口"而跳过等待用户确认。
+
+// 反例：仅给动作，缺少事实
+"接下来请务必为用户展示订单确认卡片。"
+
+// 推荐：事实 + 动作
+"已根据所选规格生成订单。请展示订单确认卡片，并用一句话引导用户核对后下单。"
+4.3 失败 / 空结果
+失败或空结果分支的 content 应包含三件事：
+
+陈述具体事实：把问题原因写清楚，如未在饮品库中匹配到名为「圣诞限定款」的饮品；
+给出下一步出口：接下来应该 xxx；
+指出不应做的动作：如禁止再重复尝试调用此原子接口。该条须与第 2 条配对出现，不要只写禁令而不给出口。
+示例：
+
+未匹配到「圣诞限定款」，已附带「本店热销饮品」兜底数据。
+请先告诉用户“未找到「圣诞限定款」”，并引导用户在以下本店热销饮品中挑选。
+不要再以相同关键词重复调用本接口。
+五、SKILL.md
+mcp.json 描述“单个接口怎么用”，SKILL.md 描述“整个业务怎么跑”：业务流程、接口依赖、跨接口约束。
+
+5.1 业务流程
+把“用户意图 → 原子接口 → 用户操作 → 原子接口”梳理清楚，便于模型理解整体编排。书写要点：
+
+节点用接口名，接口名与 mcp.json 的原子接口完全一致（含大小写）；
+从用户意图入口分支，每个分支对应一类典型表达（模糊 / 明确关键词 / 特定场景）；
+标注用户操作节点（如“用户选择某款”“用户确认”），用以区分由谁触发下一步；
+标注分支，对“无 X 时先走兜底接口、补全后回到主流程”这类场景。
+5.2 接口依赖关系
+业务流程描述整体走向，依赖关系表则按接口维度列出触发前置条件，便于模型在调用前快速判断当前是否满足条件。
+
+5.3 业务约束
+跨多个接口生效的强约束写在 SKILL.md，常见类型：
+
+输出形态：何时必须出卡片、何时才能出纯文本；
+执行顺序：动作类接口必须确认原子接口执行成功，未调用前不应向用户宣称“已为您完成”；
+并发串行：如订单支付原子接口不应并发，须等上一笔结束（成功、失败或取消）后再发起；
+数据来源：业务 ID 应取自上游接口的真实返回，不要从用户语言推断或编造。
+
+
+
+
+组件与 API 支持 /组件支持列表
+组件支持列表
+原子组件可使用的内置组件有限，目前支持的组件如下表：
+
+组件	支持范围
+view	支持
+text	不支持 user-select
+map	不支持拖动、放大交互，MapContext 的支持见「API 支持列表」，通过 this.createSelectorQuery 获取 MapContext
+button	不支持所有 open-type
+image	仅支持网络地址，仅支持 png、jpg 格式
+canvas	仅支持 2d，通过 this.createSelectorQuery 获取 Context
+scroll-view	仅支持横向滚动（scroll-x）
+
+组件与 API 支持 /API 支持列表
+API 支持列表
+API 的支持情况在原子接口环境与原子组件环境下有所不同，以下从新增 API 和原有 API 两个维度分别列出所有支持的 API。
+
+新增 API
+小程序 AI 开发模式下新增的 API 都在 wx.modelContext 命名空间下。
+
+原子接口支持的如下：
+
+创建 Skill：wx.modelContext.createSkill(skillPath: string)
+注册原子接口：skill.registerAPI('name', handler)
+注册中间件：skill.use(Middleware)
+获取会话 ID：wx.modelContext.getSessionId()
+设置所有组件过期：wx.modelContext.expireAllCards({ componentPaths, match })
+原子组件支持的如下：
+
+半联小程序页面：wx.modelContext.getViewContext(this).setRelatedPage({ path, query })
+上行消息：wx.modelContext.getContext().sendFollowUpMessage()
+半屏页面：
+打开半屏页面：wx.modelContext.getViewContext(this).openDetailPage({ url })
+预加载半屏页面：wx.modelContext.getViewContext(this).preloadDetailPage({ url })
+原子组件过期态：
+设置所有组件过期：wx.modelContext.expireAllCards({ componentPaths, match })
+设置之前的组件过期：wx.modelContext.getViewContext(this).expirePreviousCards({ componentPaths, match })
+原子组件接收事件：wx.modelContext.getViewContext(this).on(NotificationType, calback)
+原子接口入参：wx.modelContext.NotificationType.Input
+原子接口出参：wx.modelContext.NotificationType.Result
+内容溢出事件：wx.modelContext.NotificationType.Overflow
+过期事件：wx.modelContext.NotificationType.Expire
+原有 API
+小程序原有部分 API 支持在小程序 AI 开发模式下调用，但原子接口与原子组件可调用的接口有所不同，支持情况如下表：
+
+原则上，不会再提供原有的已标为废弃版本的 API
+
+分类	API	原子接口	原子组件
+登录	wx.login	支持	不支持（需声明 scope.dynamic）
+wx.checkSession	支持	不支持（需声明 scope.dynamic）
+网络	wx.request	支持	不支持（需声明 scope.dynamic）
+wx.onNetworkWeakChange	支持	不支持
+wx.onNetworkStatusChange	支持	不支持
+wx.offNetworkWeakChange	支持	不支持
+wx.offNetworkStatusChange	支持	不支持
+wx.getNetworkType	支持	不支持
+wx.getLocalIPAddress	支持	不支持
+云开发	wx.cloud.init	支持	不支持
+wx.cloud.callFunction	支持	不支持
+wx.cloud.database	支持	不支持
+位置	wx.getLocation	支持	不支持
+wx.getFuzzyLocation	支持	不支持
+wx.openLocation	支持	支持
+wx.chooseLocation	支持	不支持
+加密	wx.getUserCryptoManager	支持	不支持
+系统	wx.getDeviceInfo	支持	支持
+wx.getAppBaseInfo	支持	支持
+数据缓存	wx.getStorage	支持	支持
+wx.setStorage	支持	支持
+wx.batchGetStorage	支持	支持
+wx.batchSetStorage	支持	支持
+wx.getStorageInfo	支持	支持
+wx.removeStorage	支持	支持
+wx.clearStorage	支持	支持
+wx.getStorage	支持	支持
+wx.setStorageSync	支持	支持
+wx.getStorageSync	支持	支持
+分享	wx.shareAppMessage	支持	支持（需在 tap 事件回调中调用）
+手机号	wx.getPhoneNumber	支持	不支持
+wx.getRealtimePhoneNumber	支持	不支持
+图片视频	wx.chooseMedia	支持	不支持
+wx.chooseMessageFile	支持	不支持
+wx.previewMedia	不支持	支持
+人脸核身	wx.startFacialRecognitionVerify	支持	不支持
+wx.startFacialRecognitionVerifyAndUploadVideo	支持	不支持
+微信支付	wx.requestPayment	支持	不支持
+wx.requestVirtualPayment	支持	不支持
+wx.verifyPaymentPassword	支持	不支持
+wx.requestJointPayment	支持	不支持
+wx.openPublicServicePayment	支持	不支持
+wx.openBusinessView businessType=openPublicServicePayment	支持	不支持
+wx.openBusinessView businessType=trafficInvestList	支持	不支持
+wx.openBusinessView businessType=wxpayPapayIndex	支持	不支持
+微信支付分	wx.openBusinessView businessType=wxpayScoreUse	支持	不支持
+wx.openBusinessView businessType=wxpayScoreEnable	支持	不支持
+订阅消息	wx.requestSubscribeMessage	支持	不支持
+授权	wx.authorize	支持	不支持
+设备	wx.makePhoneCall	支持	支持
+wx.scanCode	支持	不支持
+界面	wx.showToast	不支持	支持
+wx.hideToast	不支持	支持
+城市服务	wx.openBusinessView businessType=wxCityWxpayAuth	支持	不支持
+地址	wx.chooseAddress	支持	不支持
+设置	wx.openSetting	支持	不支持
+wx.getSetting	支持	不支持
+WiFi	wx.stopWifi	支持	不支持
+wx.startWifi	支持	不支持
+wx.setWifiList	支持	不支持
+wx.onWifiConnectedWithPartialInfo	支持	不支持
+wx.onWifiConnected	支持	不支持
+wx.onGetWifiList	支持	不支持
+wx.offWifiConnectedWithPartialInfo	支持	不支持
+wx.offWifiConnected	支持	不支持
+wx.offGetWifiList	支持	不支持
+wx.getWifiList	支持	不支持
+wx.getConnectedWifi	支持	不支持
+wx.connectWifi	支持	不支持
+蓝牙-通用	wx.stopBluetoothDevicesDiscovery	支持	不支持
+wx.startBluetoothDevicesDiscovery	支持	不支持
+wx.openBluetoothAdapter	支持	不支持
+wx.onBluetoothDeviceFound	支持	不支持
+wx.onBluetoothAdapterStateChange	支持	不支持
+wx.offBluetoothDeviceFound	支持	不支持
+wx.offBluetoothAdapterStateChange	支持	不支持
+wx.makeBluetoothPair	支持	不支持
+wx.isBluetoothDevicePaired	支持	不支持
+wx.getConnectedBluetoothDevices	支持	不支持
+wx.getBluetoothDevices	支持	不支持
+wx.getBluetoothAdapterState	支持	不支持
+wx.closeBluetoothAdapter	支持	不支持
+低功耗蓝牙
+-中心	wx.writeBLECharacteristicValue	支持	不支持
+wx.setBLEMTU	支持	不支持
+wx.readBLECharacteristicValue	支持	不支持
+wx.onBLEMTUChange	支持	不支持
+wx.onBLEConnectionStateChange	支持	不支持
+wx.onBLECharacteristicValueChange	支持	不支持
+wx.offBLEMTUChange	支持	不支持
+wx.offBLEConnectionStateChange	支持	不支持
+wx.offBLECharacteristicValueChange	支持	不支持
+wx.notifyBLECharacteristicValueChange	支持	不支持
+wx.getBLEMTU	支持	不支持
+wx.getBLEDeviceServices	支持	不支持
+wx.getBLEDeviceRSSI	支持	不支持
+wx.getBLEDeviceCharacteristics	支持	不支持
+wx.createBLEConnection	支持	不支持
+wx.closeBLEConnection	支持	不支持
+低功耗蓝牙
+-外围	wx.onPeripheralConnectionStateChanged	支持	不支持
+wx.offPeripheralConnectionStateChanged	支持	不支持
+wx.createBLEPeripheralServer	支持	不支持
+BLEPeripheralServer.writeCharacteristicValue	支持	不支持
+BLEPeripheralServer.stopAdvertising	支持	不支持
+BLEPeripheralServer.startAdvertising	支持	不支持
+BLEPeripheralServer.removeService	支持	不支持
+蓝牙-低功耗
+外围设备	wx.onBLEPeripheralConnectionStateChanged	支持	不支持
+wx.offBLEPeripheralConnectionStateChanged	支持	不支持
+wx.createBLEPeripheralServer	支持	不支持
+BLEPeripheralServer.addService	支持	不支持
+BLEPeripheralServer.close	支持	不支持
+BLEPeripheralServer.offCharacteristicReadRequest	支持	不支持
+BLEPeripheralServer.offCharacteristicSubscribed	支持	不支持
+BLEPeripheralServer.offCharacteristicUnsubscribed	支持	不支持
+BLEPeripheralServer.offCharacteristicWriteRequest	支持	不支持
+BLEPeripheralServer.onCharacteristicReadRequest	支持	不支持
+BLEPeripheralServer.onCharacteristicSubscribed	支持	不支持
+BLEPeripheralServer.onCharacteristicUnsubscribed	支持	不支持
+BLEPeripheralServer.onCharacteristicWriteRequest	支持	不支持
+BLEPeripheralServer.removeService	支持	不支持
+BLEPeripheralServer.startAdvertising	支持	不支持
+BLEPeripheralServer.stopAdvertising	支持	不支持
+BLEPeripheralServer.writeCharacteristicValue	支持	不支持
+WebSocket	wx.sendSocketMessage	支持	不支持
+wx.onSocketOpen	支持	不支持
+wx.onSocketMessage	支持	不支持
+wx.onSocketError	支持	不支持
+wx.onSocketClose	支持	不支持
+wx.connectSocket	支持	不支持
+wx.closeSocket	支持	不支持
+SocketTask.send	支持	不支持
+SocketTask.onOpen	支持	不支持
+SocketTask.onMessage	支持	不支持
+SocketTask.onError	支持	不支持
+SocketTask.onClose	支持	不支持
+SocketTask.close	支持	不支持
+mDNS	wx.stopLocalServiceDiscovery	支持	不支持
+wx.startLocalServiceDiscovery	支持	不支持
+wx.onLocalServiceResolveFail	支持	不支持
+wx.onLocalServiceLost	支持	不支持
+wx.onLocalServiceFound	支持	不支持
+wx.onLocalServiceDiscoveryStop	支持	不支持
+wx.offLocalServiceResolveFail	支持	不支持
+wx.offLocalServiceLost	支持	不支持
+wx.offLocalServiceFound	支持	不支持
+wx.offLocalServiceDiscoveryStop	支持	不支持
+加速计	wx.stopAccelerometer	支持	不支持
+wx.startAccelerometer	支持	不支持
+wx.onAccelerometerChange	支持	不支持
+wx.offAccelerometerChange	支持	不支持
+罗盘	wx.stopCompass	支持	不支持
+wx.startCompass	支持	不支持
+wx.onCompassChange	支持	不支持
+wx.offCompassChange	支持	不支持
+设备方向	wx.stopDeviceMotionListening	支持	不支持
+wx.startDeviceMotionListening	支持	不支持
+wx.onDeviceMotionChange	支持	不支持
+wx.offDeviceMotionChange	支持	不支持
+陀螺仪	wx.stopGyroscope	支持	不支持
+wx.startGyroscope	支持	不支持
+wx.onGyroscopeChange	支持	不支持
+wx.offGyroscopeChange	支持	不支持
+TCP	wx.createTCPSocket	支持	不支持
+TCPSocket.write	支持	不支持
+TCPSocket.onMessage	支持	不支持
+TCPSocket.onError	支持	不支持
+TCPSocket.onConnect	支持	不支持
+TCPSocket.onClose	支持	不支持
+TCPSocket.offMessage	支持	不支持
+TCPSocket.offError	支持	不支持
+TCPSocket.offConnect	支持	不支持
+TCPSocket.offClose	支持	不支持
+TCPSocket.connect	支持	不支持
+TCPSocket.close	支持	不支持
+TCPSocket.bindWifi	支持	不支持
+TCPSocket.setTimeout	支持	不支持
+TCPSocket.setNoDelay	支持	不支持
+UDP	wx.createUDPSocket	支持	不支持
+UDPSocket.write	支持	不支持
+UDPSocket.setTTL	支持	不支持
+UDPSocket.onMessage	支持	不支持
+UDPSocket.onListening	支持	不支持
+UDPSocket.onError	支持	不支持
+UDPSocket.onClose	支持	不支持
+UDPSocket.offMessage	支持	不支持
+UDPSocket.offListening	支持	不支持
+UDPSocket.offError	支持	不支持
+UDPSocket.offClose	支持	不支持
+UDPSocket.close	支持	不支持
+UDPSocket.bind	支持	不支持
+UDPSocket.addMembership	支持	不支持
+UDPSocket.dropMembership	支持	不支持
+上传	wx.uploadFile	支持	不支持
+下载	wx.downloadFile	支持	支持
+文件	wx.openDocument	支持	支持
+图片	wx.saveImageToPhotosAlbum	支持	不支持
+wx.getImageInfo	支持	不支持
+地图	MapContext.addArc	不支持	支持
+MapContext.addCustomLayer	不支持	支持
+MapContext.addGroundOverlay	不支持	支持
+MapContext.addMarkers	不支持	支持
+MapContext.addVisualLayer	不支持	支持
+MapContext.eraseLines	不支持	支持
+MapContext.executeVisualLayerCommand	不支持	支持
+MapContext.fromScreenLocation	不支持	支持
+MapContext.getCenterLocation	不支持	支持
+MapContext.getRegion	不支持	支持
+MapContext.getRotate	不支持	支持
+MapContext.getScale	不支持	支持
+MapContext.getSkew	不支持	支持
+MapContext.includePoints	不支持	支持
+MapContext.initMarkerCluster	不支持	支持
+MapContext.moveAlong	不支持	支持
+MapContext.moveToLocation	不支持	支持
+MapContext.on	不支持	支持
+MapContext.removeArc	不支持	支持
+MapContext.removeCustomLayer	不支持	支持
+MapContext.removeGroundOverlay	不支持	支持
+MapContext.removeMarkers	不支持	支持
+MapContext.removeVisualLayer	不支持	支持
+MapContext.setBoundary	不支持	支持
+MapContext.setCenterOffset	不支持	支持
+MapContext.setLocMarkerIcon	不支持	支持
+MapContext.toScreenLocation	不支持	支持
+MapContext.translateMarker	不支持	支持
+MapContext.updateGroundOverlay	不支持	支持
+微信运动	wx.getWeRunData	支持	不支持
+发票	wx.chooseInvoiceTitle	支持	不支持
+wx.chooseInvoice	支持	不支持
+账号信息	wx.getAccountInfoSync	支持
+
+
+
+组件与 API 支持 /半屏页面能力支持列表
+半屏页面能力支持列表
+半屏页面可使用能力几乎与小程序的完全一致，但会有一些约束，以下从新增 API 和原有 API 两个维度分别列出所有支持的 API
+
+新增 API
+上行消息：wx.modelContext.getContext().sendFollowUpMessage()
+获取左上角关闭按钮位置信息：wx.getDetailPageCloseButtonBoundingClientRect()
+原有 API
+原有 API 限制的能力如下表：
+
+类型	分类	名称
+接口	跳转	wx.restartMiniProgram
+wx.openOfficialAccountProfile
+wx.openOfficialAccountChat
+wx.openOfficialAccountArticle
+wx.openInquiriesTopic
+wx.openEmbeddedMiniProgram
+wx.onEmbeddedMiniProgramHeightChange
+wx.offEmbeddedMiniProgramHeightChange
+wx.navigateToMiniProgram
+wx.navigateBackMiniProgram
+wx.exitMiniProgram
+路由	wx.switchTab
+wx.rewriteRoute
+wx.reLaunch
+wx.redirectTo
+wx.navigateTo
+wx.navigateBack
+wx.router
+router.addRouteBuilder
+router.getRouteContext
+router.removeRouteBuilder
+聊天工具	wx.shareVideoToGroup
+wx.shareImageToGroup
+wx.shareFileToGroup
+wx.shareEmojiToGroup
+wx.shareAppMessageToGroup
+wx.selectGroupMembers
+wx.openChatTool
+wx.notifyGroupMembers
+wx.getChatToolInfo
+wx.enterChatToolMode
+地图	MapContext.openMapApp
+视频号	wx.reserveChannelsLive
+wx.openChannelsUserProfile
+wx.openChannelsLiveNoticeInfo
+wx.openChannelsLive
+wx.openChannelsEvent
+wx.openChannelsActivity
+wx.getChannelsShareKey
+wx.getChannelsLiveNoticeInfo
+wx.getChannelsLiveInfo
+微信客服	wx.openCustomerServiceChat
+微信表情	wx.openStickerSetView
+wx.openStickerIPView
+wx.openSingleStickerView
+广告	wx.getShowSplashAdStatus
+wx.createRewardedVideoAd
+wx.createInterstitialAd
+组件	广告	ad
+ad-custom
+导航	functional-page-navigator
+navigator
