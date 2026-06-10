@@ -7,4 +7,6 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-
+mcp-schema = { path = "../mcp-schema" }
+serde_json.workspace = true
+thiserror.workspace = true

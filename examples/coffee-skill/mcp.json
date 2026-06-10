@@ -1,0 +1,122 @@
+{
+  "apis": [
+    {
+      "name": "searchDrinks",
+      "description": "搜索可点单的咖啡饮品",
+      "_meta": {
+        "ui": {
+          "componentPath": "components/drink-list/index"
+        },
+        "anp": {
+          "risk": "low"
+        }
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "用户想喝的饮品关键词"
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "drinks": {
+            "type": "array"
+          }
+        },
+        "required": ["drinks"]
+      }
+    },
+    {
+      "name": "confirmOrder",
+      "description": "确认用户选择的饮品并创建待支付订单",
+      "_meta": {
+        "ui": {
+          "componentPath": "components/order-confirm/index"
+        },
+        "anp": {
+          "risk": "order"
+        }
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "drinkId": {
+            "type": "string",
+            "description": "饮品 ID"
+          },
+          "size": {
+            "type": "string",
+            "enum": ["small", "medium", "large"],
+            "description": "杯型"
+          },
+          "sugar": {
+            "type": "string",
+            "description": "糖度"
+          }
+        },
+        "required": ["drinkId"]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "orderId": {
+            "type": "string"
+          },
+          "payable": {
+            "type": "number"
+          }
+        },
+        "required": ["orderId", "payable"]
+      }
+    },
+    {
+      "name": "payOrder",
+      "description": "对待支付订单执行 mock 支付",
+      "_meta": {
+        "ui": {
+          "componentPath": "components/payment-result/index"
+        },
+        "anp": {
+          "risk": "payment"
+        }
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "orderId": {
+            "type": "string",
+            "description": "订单 ID"
+          }
+        },
+        "required": ["orderId"]
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "orderId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": ["orderId", "status"]
+      }
+    }
+  ],
+  "components": [
+    {
+      "path": "components/drink-list/index"
+    },
+    {
+      "path": "components/order-confirm/index"
+    },
+    {
+      "path": "components/payment-result/index"
+    }
+  ]
+}
