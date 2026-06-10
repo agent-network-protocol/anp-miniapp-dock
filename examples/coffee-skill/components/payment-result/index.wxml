@@ -1,3 +1,5 @@
 <view class="card">
-  <text>{{ title }}</text>
+  <text class="title">{{ title }}</text>
+  <text>{{ orderId }}</text>
+  <text>{{ status }}</text>
 </view>

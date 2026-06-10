@@ -82,6 +82,8 @@ pub struct RenderStyle {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub background: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub opacity: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font_size: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub font_weight: Option<String>,
@@ -107,6 +109,7 @@ impl RenderStyle {
             && self.padding.is_none()
             && self.color.is_none()
             && self.background.is_none()
+            && self.opacity.is_none()
             && self.font_size.is_none()
             && self.font_weight.is_none()
             && self.line_height.is_none()

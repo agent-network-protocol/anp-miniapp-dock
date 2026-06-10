@@ -1,3 +1,47 @@
 .card {
   padding: 12px;
+  background-color: #ffffff;
+  border-radius: 8px;
+}
+
+.title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #202124;
+}
+
+.drink-scroll {
+  display: flex;
+  flex-direction: row;
+  margin: 12px 0;
+}
+
+.drink-item {
+  width: 160px;
+  margin: 0 8px 0 0;
+  padding: 10px;
+  border: 1px solid #d9dee8;
+  border-radius: 8px;
+}
+
+.drink-image {
+  width: 120px;
+  height: 90px;
+}
+
+.drink-name {
+  font-size: 15px;
+  color: #202124;
+}
+
+.drink-price {
+  color: #2f6f5e;
+  font-weight: 600;
+}
+
+.drink-action {
+  margin: 8px 0 0 0;
+  padding: 6px;
+  background-color: #2f6f5e;
+  color: #ffffff;
 }

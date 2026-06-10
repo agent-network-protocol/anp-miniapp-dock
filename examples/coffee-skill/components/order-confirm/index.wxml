@@ -1,3 +1,6 @@
 <view class="card">
-  <text>{{ title }}</text>
+  <text class="title">{{ title }}</text>
+  <text>{{ drinkName }}</text>
+  <text>{{ payable }}</text>
+  <button class="primary" bindtap="payOrder" data-order-id="{{ orderId }}">确认支付</button>
 </view>

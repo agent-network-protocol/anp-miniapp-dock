@@ -1,3 +1,12 @@
 <view class="card">
-  <text>{{ title }}</text>
+  <text class="title">{{ title }}</text>
+  <scroll-view class="drink-scroll" scroll-x="true">
+    <view class="drink-item" wx:for="{{ drinks }}" wx:key="id" bindtap="selectDrink" data-id="{{ item.id }}">
+      <image class="drink-image" src="{{ item.image }}" bindload="onImageLoad" binderror="onImageError" />
+      <text class="drink-name">{{ item.name }}</text>
+      <text class="drink-price">{{ item.price }}</text>
+      <button class="drink-action" bindtap="confirmDrink" data-id="{{ item.id }}">选择</button>
+    </view>
+  </scroll-view>
+  <text wx:if="{{ empty }}">暂无可点饮品</text>
 </view>
