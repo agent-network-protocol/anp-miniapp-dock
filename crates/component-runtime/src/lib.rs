@@ -1,6 +1,8 @@
 #![doc = "MiniApp MCP Component Runtime, WXML/WXSS subset, events, and Render IR crate."]
 
 pub mod compiler;
+pub mod component_vm;
+pub mod events;
 pub mod loader;
 pub mod render_ir;
 pub mod wxml;
@@ -10,6 +12,11 @@ pub use compiler::{
     compile_component_to_render_ir, compile_wxml_to_render_ir, BindingContext,
     ComponentCompileError, ComponentRenderOutput,
 };
+pub use component_vm::{
+    ComponentInput, ComponentInstance, ComponentOperationOutcome, ComponentTraceEntry,
+    ComponentTraceKind, ComponentVmAction, ComponentVmConfig, ComponentVmError,
+};
+pub use events::{ComponentEvent, ComponentEventKind};
 pub use loader::{ComponentLoadError, ComponentPackage};
 pub use render_ir::{
     ComponentAction, RenderEventBinding, RenderEventKind, RenderNode, RenderNodeKind, RenderStyle,
