@@ -1,0 +1,34 @@
+[workspace]
+members = [
+    "crates/anp-adapter",
+    "crates/card-spec",
+    "crates/component-runtime",
+    "crates/consent-audit",
+    "crates/demo-server",
+    "crates/dock-cli",
+    "crates/dock-core",
+    "crates/js-runtime-quickjs",
+    "crates/mcp-schema",
+    "crates/skill-loader",
+    "crates/wx-compat",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+rust-version = "1.88.0"
+license = "MIT"
+repository = "git@github.com:agent-network-protocol/anp-miniapp-dock.git"
+
+[workspace.dependencies]
+anp = { path = "../anp/rust", default-features = false, features = ["network"] }
+anyhow = "1"
+axum = { version = "0.7", default-features = false, features = ["json", "tokio"] }
+clap = { version = "4", features = ["derive"] }
+jsonschema = "0.17"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+tracing = "0.1"

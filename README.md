@@ -2,7 +2,7 @@
 
 `anp-miniapp-dock` is a DID-native Rust Skill runtime for running MiniApp MCP-compatible agent skills over ANP.
 
-The project is currently in architecture-baseline status. Source crates, tests, examples, and runtime assets will be added under clearly named top-level directories such as `crates/`, `tests/`, and `examples/` as implementation starts.
+The project is currently in Rust workspace scaffold status. Core runtime crates live under `crates/`; examples and end-to-end tests will be added under `examples/` and `tests/` as the MVP implementation progresses.
 
 ## Architecture Documents
 
@@ -14,6 +14,16 @@ The project is currently in architecture-baseline status. Source crates, tests, 
 
 ## Current Development Status
 
-No Cargo workspace or automated test runner is checked in yet. Do not run or document Rust build commands as active project commands until the corresponding `Cargo.toml` files exist.
+The workspace is intentionally thin at this stage: crates expose only compile-time scaffold entry points until the feature steps fill in MCP schema, Skill loading, orchestration, runtime, ANP adapter, component rendering, CLI, and demo server behavior.
 
 The planned MVP keeps the MiniApp MCP interface contract compatible at the Skill boundary while replacing identity, authorization, network, sandboxing, and high-risk action handling with an independent Rust Runtime backed by ANP DID and the ANP Rust SDK.
+
+## Development Commands
+
+The repository pins Rust `1.88.0` through `rust-toolchain.toml` to match the ANP Rust SDK.
+
+```bash
+cargo metadata --format-version 1 --no-deps
+cargo fmt --check
+cargo test --workspace
+```
