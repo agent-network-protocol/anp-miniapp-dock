@@ -57,7 +57,7 @@
 8. 支持小程序 MCP 原子组件运行时子集，包括 P0 WXML/WXSS 子集、基础生命周期、`setData` 和 Render IR，并保留通用结构化卡片 fallback；
 9. 支持 `sendFollowUpMessage` 和 `api/call`；
 10. 支持卡片过期态；
-11. 支持最小 `wx` shim：网络、存储、会话、文件、位置可选；
+11. 支持最小 `wx` shim 与 host capability boundary：Atomic API VM 直接支持 `createSkill` / `registerAPI` / `use`；网络、存储、会话、卡片、设备信息和支付等能力由 Rust host/adapter 层隔离承载，部分 JS 直调能力留给后续 runtime bridge；
 12. 高风险动作支持用户确认和审计。
 13. 接口和文件结构尽量与小程序 MCP 保持一致，底层实现替换为 ANP/Rust Runtime。
 
@@ -144,29 +144,25 @@ MVP 必须提供 JS Sandbox，用于执行小程序 MCP 原子接口代码。
 
 - 禁止访问宿主全局对象；
 - 禁止任意文件系统访问；
-- 禁止任意网络访问，必须走 `wx.request` allowlist；
+- 禁止任意网络访问，网络能力必须走 host request boundary 和 allowlist，JS sandbox 不直接开放 `fetch`、socket 或远程代码；
 - 禁止动态加载远程代码；
 - 禁止 eval 或可配置禁用 eval；
 - 限制内存、CPU、执行时间；
-- 每个 Skill 独立存储命名空间；
+- storage boundary 按 DID、商家 Agent 和 Skill 隔离；
 - 每个商家 Agent 独立权限域。
 
 ## 8. wx Shim / Capability Broker
 
 容器提供有限 `wx` 兼容层。
 
-### 8.1 MVP 支持
+### 8.1 当前 Rust MVP 支持
 
-- `wx.request`：受域名白名单限制；
-- `wx.getStorage`、`wx.setStorage`、Sync 版本：DID + Skill 作用域隔离；
-- `wx.getStorageInfo`、`wx.removeStorage`、`wx.clearStorage`；
-- `wx.downloadFile`、`wx.uploadFile`、`wx.openDocument`；
-- `wx.getLocation` / `wx.getFuzzyLocation`：需用户授权；
-- `wx.getDeviceInfo`、`wx.getAppBaseInfo`：返回容器环境信息；
-- `wx.modelContext.getSessionId`；
-- `wx.modelContext.expireAllCards`；
-- `sendFollowUpMessage`；
-- `api/call`。
+- Atomic API VM 直接支持 `wx.modelContext.createSkill`、`skill.registerAPI` 和 `skill.use`；
+- Component VM 直接支持 `wx.modelContext.getContext(this)`、`wx.modelContext.getViewContext(this)`、`NotificationType.Input/Result/Expire`、`sendFollowUpMessage`、`api/call`、`expirePreviousCards`、`expireAllCards`、`wx.getDeviceInfo` 和 `wx.getAppBaseInfo`；
+- `wx-compat` 和 `anp-adapter` 已实现 `wx.request` 对应的 host request boundary、域名 allowlist、DID-aware signed HTTP、challenge/login contract、capability token cache；
+- scoped storage 已在 Rust host boundary 实现，按 DID、商家 Agent 和 Skill 隔离；
+- `wx.requestPayment` 对应的高风险 consent/audit 和 mock payment flow 已通过 coffee demo 验证；
+- 文件、位置、媒体和更多设备能力暂未作为 P0 JS 直调 API 实现，保留为后续 host capability 扩展。
 
 ### 8.2 替代实现
 
@@ -254,14 +250,14 @@ MVP 需要提供基础 CLI 或 SDK：
 - 预览结构化卡片；
 - 输出 ANP Agent 接入示例。
 
-建议命令：
+MVP 实际命令：
 
 ```bash
-agent-mini init
-agent-mini validate
-agent-mini run-skill
-agent-mini call-api
-agent-mini preview-card
+cargo run -p dock-cli -- validate examples/coffee-skill
+cargo run -p dock-cli -- call-api examples/coffee-skill searchDrinks '{}'
+cargo run -p dock-cli -- preview-component examples/coffee-skill components/drink-list/index '{"apiName":"searchDrinks","structuredContent":{"drinks":[{"id":"latte","name":"Latte","price":18}]}}'
+cargo run -p dock-cli -- preview-card '{"content":[{"type":"text","text":"paid"}],"structuredContent":{"orderId":"order_demo_001","status":"paid"}}'
+cargo run -p dock-cli -- run-demo --skill examples/coffee-skill --server http://127.0.0.1:3000
 ```
 
 ## 12. 验收标准

@@ -6,7 +6,7 @@ MVP 边界定义为：
 
 > 原子接口尽量做到小程序 MCP 契约级兼容；原子组件做到“小程序 MCP 原子组件运行时子集”兼容，不做完整小程序组件/页面运行时。
 
-`anp-miniapp-dock` 完整继承小程序 MCP 的核心抽象：`SKILL.md`、`mcp.json`、原子接口、原子组件、`content`、`structuredContent`、`_meta`、`sendFollowUpMessage` 和 `api/call`。底层运行时由独立 Rust Runtime、QuickJS-NG、ANP Rust SDK、Render IR 和 Flutter Renderer Adapter 实现，不复刻微信账号、微信支付、云开发、完整页面路由或完整 WXML/WXSS。
+`anp-miniapp-dock` 完整继承小程序 MCP 的核心抽象：`SKILL.md`、`mcp.json`、原子接口、原子组件、`content`、`structuredContent`、`_meta`、`sendFollowUpMessage` 和 `api/call`。底层运行时由独立 Rust Runtime、QuickJS-NG、ANP Rust SDK、Render IR JSON 和 CardSpec fallback 实现；Flutter Renderer Adapter 属于后续宿主接入，不复刻微信账号、微信支付、云开发、完整页面路由或完整 WXML/WXSS。
 
 ## 2. 总体运行时
 
@@ -15,7 +15,8 @@ MVP 拆成两个隔离 VM：
 ```text
 Atomic API VM
   执行 index.js / apis/*.js
-  负责原子接口注册、中间件、参数校验、wx.request 和标准返回
+  负责原子接口注册、中间件、参数校验和标准返回
+  网络、存储和会话能力通过 Rust host/adapter boundary 承载
 
 Atomic Component VM
   执行 components/*/index.js
@@ -97,9 +98,11 @@ coffee-skill/
 运行 middleware
 校验 inputSchema
 返回标准 AtomicApiResult
-通过 wx.request 调用商家服务
-通过 ANP DID 完成身份和网络请求
+建立 wx.request / storage / session host boundary
+通过 ANP DID adapter 完成身份和网络请求边界
 ```
+
+当前 Rust MVP 已完成 Skill/API VM 主线和 ANP adapter 边界。`wx.request`、storage、session/card API 的直接 JS 注入属于后续 runtime bridge 扩展，不影响 P0 coffee demo 通过 demo-server auth/business API 和 local Skill VM 完成端到端验证。
 
 ### 4.2 `mcp.json.apis[]`
 
@@ -229,23 +232,19 @@ interface TextContent {
 
 ### 4.6 原子接口环境 `wx.*`
 
-P0 必须支持：
+当前 Rust MVP 的 P0 直接 JS 支持与 host/adapter 边界：
 
 | 分类 | API | 实现方式 |
 |---|---|---|
 | Skill | `wx.modelContext.createSkill` | QuickJS Host Bridge |
 | Skill | `skill.registerAPI` | Runtime registry |
 | Skill | `skill.use` | Middleware chain |
-| Session | `wx.modelContext.getSessionId` | Runtime session id |
-| Card | `wx.modelContext.expireAllCards` | 通知渲染层过期卡片 |
-| 网络 | `wx.request` | ANP DID HTTP Client |
-| 存储 | `wx.getStorage / setStorage` | DID + Skill scope storage |
-| 存储 | Sync storage API | 本地同步 KV |
-| 文件 | `wx.uploadFile` | P0 mock 或简单实现 |
-| 文件 | `wx.downloadFile` | P0 简单实现 |
-| 文件 | `wx.openDocument` | 调宿主能力或 fallback |
-| 系统 | `wx.getDeviceInfo` | 返回 Runtime 环境信息 |
-| 系统 | `wx.getAppBaseInfo` | 返回 `anp-miniapp-dock` 信息 |
+| Session | `wx.modelContext.getSessionId` | host boundary 已实现；JS 注入待后续扩展 |
+| Card | `wx.modelContext.expireAllCards` | host boundary 已实现；JS 注入待后续扩展 |
+| 网络 | `wx.request` | `wx-compat` RequestBroker + `anp-adapter` 已实现；JS 注入待后续扩展 |
+| 存储 | `wx.getStorage / setStorage` | scoped storage 已实现；JS 注入待后续扩展 |
+| 文件 | `wx.uploadFile / downloadFile / openDocument` | P0 未直接实现，保留为后续 host capability |
+| 系统 | `wx.getDeviceInfo / getAppBaseInfo` | host/component helper 已实现 |
 
 P0 替代实现：
 
@@ -256,8 +255,8 @@ P0 替代实现：
 | `wx.requestPayment` | Payment Intent mock + 用户确认 |
 | `wx.getPhoneNumber` | MVP mock，后续手机号凭证 |
 | `wx.chooseAddress` | MVP mock，后续宿主地址选择器 |
-| `wx.getLocation` | 可选授权，P0 可 mock |
-| `wx.getFuzzyLocation` | 可选授权，P0 可 mock |
+| `wx.getLocation` | 后续可接宿主授权或 mock |
+| `wx.getFuzzyLocation` | 后续可接宿主授权或 mock |
 
 P1 可支持：
 
@@ -314,8 +313,8 @@ interface ApiCallContext {
 执行限制：
 
 1. 每次调用独立 QuickJS context；
-2. 每个 Skill 独立 storage；
-3. `wx.request` 必须走 allowlist；
+2. storage host boundary 必须按 DID、merchant 和 Skill 隔离；
+3. `wx.request` host boundary 必须走 allowlist；
 4. 默认禁止访问文件系统；
 5. 默认禁止 `eval`；
 6. 默认禁止远程代码加载；
@@ -342,7 +341,7 @@ interface ApiCallContext {
 支持小程序 MCP 原子组件运行时子集
 支持组件 JS 生命周期
 支持 WXML/WXSS 子集
-支持结构化数据渲染成 Flutter 卡片
+支持结构化数据输出 Render IR JSON 或 fallback CardSpec
 支持用户点击后继续驱动 Agent 流程
 ```
 
@@ -426,13 +425,13 @@ created
 
 attached
   → 首次生成 Render IR
-  → Flutter Renderer 渲染卡片
+  → 输出 Render IR JSON 或交给宿主渲染器
 
 setData
   → 更新 Component State
   → 重新计算 WXML binding
   → diff Render IR
-  → Flutter 局部刷新或整体刷新
+  → Render IR JSON 刷新或宿主渲染器刷新
 
 detached
   → 清理事件监听
@@ -529,7 +528,7 @@ P0 支持示例：
 | border-radius | 支持 |
 | opacity | 支持 |
 | display none/block/flex | 支持 |
-| rpx | 支持，映射到 Flutter logical pixels |
+| rpx | 支持，映射到 host logical pixels |
 | vw | P1 |
 | media query | P2 |
 | animation / transition | 不支持 |
@@ -560,8 +559,8 @@ P1 支持：
 | `canvas` | 静态绘制或降级图片 |
 | `input` | 表单场景需要时加入 |
 | `textarea` | 表单场景需要时加入 |
-| `radio` | 可用 Flutter 组件替代 |
-| `checkbox` | 可用 Flutter 组件替代 |
+| `radio` | 可用宿主组件替代 |
+| `checkbox` | 可用宿主组件替代 |
 | `picker` | 规格选择可用 BottomSheet 替代 |
 
 不支持：
@@ -593,7 +592,7 @@ P0 支持：
 | `viewCtx.expirePreviousCards()` | 支持 |
 | `wx.modelContext.expireAllCards()` | 支持 |
 | `sendFollowUpMessage()` | 支持 |
-| `wx.getStorage / setStorage` | P0 可支持 |
+| `wx.getStorage / setStorage` | scoped storage host boundary 已实现；组件 JS 直调待后续扩展 |
 | `wx.getDeviceInfo` | 支持 |
 | `wx.getAppBaseInfo` | 支持 |
 
@@ -686,7 +685,7 @@ Atomic API VM 执行 handler
   ↓
 Component VM 生成 Render IR
   ↓
-Flutter Renderer 渲染卡片
+Render IR JSON 交给宿主渲染器
   ↓
 用户点击组件
   ↓
@@ -737,14 +736,14 @@ type ComponentAction =
 
 ## 7. Render IR
 
-WXML AST 不直接驱动 Flutter。P0 渲染链路是：
+WXML AST 不直接驱动宿主 UI。当前 Rust MVP 渲染链路是：
 
 ```text
 WXML + WXSS + Component State
   ↓
 Render IR
   ↓
-Flutter Renderer Adapter
+Render IR JSON / host renderer adapter
 ```
 
 P0 Render IR：
@@ -762,7 +761,7 @@ interface RenderNode {
 
 Render IR 的作用：
 
-1. 让 Flutter Renderer 更简单；
+1. 让后续 Flutter Renderer 更简单；
 2. 未来可支持 Web Renderer；
 3. 可做快照测试；
 4. 可做组件调试器；
@@ -781,10 +780,10 @@ createSkill
 registerAPI
 use middleware
 AtomicApiResult
-wx.request + ANP DID
-storage
-getSessionId
-expireAllCards
+wx.request + ANP DID host boundary
+scoped storage host boundary
+getSessionId host boundary
+expireAllCards host boundary
 错误处理
 超时控制
 日志捕获
@@ -807,7 +806,7 @@ wx:if/wx:for
 bindtap
 基础 WXSS
 Render IR
-Flutter Renderer Adapter
+Render IR JSON
 sendFollowUpMessage
 api/call
 expirePreviousCards
@@ -906,10 +905,11 @@ expirePreviousCards
 ## 10. 最终 P0 边界
 
 ```text
-P0：完整支持原子接口契约与执行；
+P0：完整支持原子接口契约与执行主线；
 P0：支持原子组件运行时最小子集；
 P0：不支持完整微信小程序组件和页面；
-P0：渲染链路采用 Component VM → WXML/WXSS 子集 → Render IR → Flutter Renderer Adapter；
+P0：当前 Rust MVP 渲染链路采用 Component VM → WXML/WXSS 子集 → Render IR JSON；
+P0：Flutter Renderer Adapter 属于后续宿主接入；
 P0：失败时 fallback 到 CardSpec / structuredContent / content。
 ```
 

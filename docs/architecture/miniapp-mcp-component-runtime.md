@@ -2,7 +2,7 @@
 
 ## 1. 目标
 
-`MiniApp MCP Component Runtime` 用于在 `anp-miniapp-dock` 中运行小程序 MCP 原子组件子集。目标不是完整复刻微信小程序组件运行时，而是在接口层尽量兼容小程序 MCP 的原子组件写法，在实现层用 Rust、QuickJS-NG、WXML/WXSS 子集编译、Render IR 和 Flutter Renderer Adapter 完成渲染。
+`MiniApp MCP Component Runtime` 用于在 `anp-miniapp-dock` 中运行小程序 MCP 原子组件子集。目标不是完整复刻微信小程序组件运行时，而是在接口层尽量兼容小程序 MCP 的原子组件写法，在实现层用 Rust、QuickJS-NG、WXML/WXSS 子集编译和 Render IR JSON 完成 P0 渲染输出；Flutter Renderer Adapter 是后续宿主接入后端。
 
 核心目标：
 
@@ -30,8 +30,8 @@ QuickJS-NG Component VM
 WXML/WXSS Subset Compiler
         ↓
 Render IR / Component Tree
-        ↓
-Flutter Renderer Adapter
+    ↓
+Render IR JSON / Future Flutter Renderer Adapter
         ↓
 Conversation Card
 ```
@@ -210,10 +210,10 @@ ComponentAction
 - `viewCtx.expirePreviousCards({ componentPaths, match })`；
 - `wx.modelContext.expireAllCards({ componentPaths, match })`；
 - `viewCtx.setRelatedPage({ path, query })`，MVP 可记录但不打开完整页面；
-- storage 子集；
+- scoped storage host boundary；组件 JS 直调待后续扩展；
 - `wx.getDeviceInfo`、`wx.getAppBaseInfo`。
 
-动态组件权限打开后，才支持：
+动态组件权限打开后，后续可支持：
 
 - 受 allowlist 限制的 `wx.request`；
 - 受生命周期管理的 `setTimeout` / `setInterval` 子集；
@@ -270,7 +270,7 @@ P0：原子组件运行时最小子集
 - 解析 `view`、`text`、`image`、`button`、横向 `scroll-view`；
 - 支持 `wx:if`、`wx:for`、`{{ path }}`、`bindtap` 和基础 WXSS；
 - 输出 Render IR；
-- Flutter Renderer Adapter 展示基础组件；
+- 当前 Rust MVP 输出 Render IR JSON；Flutter Renderer Adapter 属于后续宿主接入；
 - 任一阶段失败时 fallback 到 CardSpec / structuredContent / content。
 
 P1：动态组件与半屏 fallback

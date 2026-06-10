@@ -2,7 +2,7 @@
 
 `anp-miniapp-dock` is a DID-native Rust Skill runtime for running MiniApp MCP-compatible agent skills over ANP.
 
-The project is currently in Rust workspace scaffold status. Core runtime crates live under `crates/`; examples and end-to-end tests will be added under `examples/` and `tests/` as the MVP implementation progresses.
+The MVP is now implemented as a Cargo workspace. It can load a MiniApp MCP-style Skill, validate `mcp.json`, run atomic API JavaScript in an isolated QuickJS-backed VM, compile and execute a MiniApp MCP component runtime subset, route high-risk actions through consent/audit, and run a local coffee ordering demo through `dock-cli` and `demo-server`.
 
 ## Architecture Documents
 
@@ -11,19 +11,79 @@ The project is currently in Rust workspace scaffold status. Core runtime crates 
 - [MiniApp MCP Compatibility MVP](docs/architecture/miniapp-mcp-compatibility-mvp.md)
 - [MiniApp MCP Component Runtime](docs/architecture/miniapp-mcp-component-runtime.md)
 - [MiniApp MCP protocol notes](docs/weichat-miniapp-mcp-protocol/weichat-miniapp-mcp.txt)
+- [Local demo runbook](docs/runbook/local-demo.md)
+- [Security runbook](docs/runbook/security.md)
 
-## Current Development Status
+## Workspace Layout
 
-The workspace is intentionally thin at this stage: crates expose only compile-time scaffold entry points until the feature steps fill in MCP schema, Skill loading, orchestration, runtime, ANP adapter, component rendering, CLI, and demo server behavior.
-
-The planned MVP keeps the MiniApp MCP interface contract compatible at the Skill boundary while replacing identity, authorization, network, sandboxing, and high-risk action handling with an independent Rust Runtime backed by ANP DID and the ANP Rust SDK.
+- `crates/mcp-schema`: MiniApp MCP manifest/result models and validation.
+- `crates/skill-loader`: `SKILL.md`, `mcp.json`, API module, and component package loading.
+- `crates/dock-core`: Orchestrator, API registry, permission, consent, audit, and render routing boundaries.
+- `crates/js-runtime-quickjs`: QuickJS-backed atomic API VM using `rquickjs`.
+- `crates/wx-compat`: P0 `wx` capability profiles, scoped storage, request broker traits, and model context helpers.
+- `crates/anp-adapter`: ANP DID-aware signed HTTP, challenge/login contracts, allowlist, and capability token cache.
+- `crates/consent-audit`: risk policy, mock consent provider, proof, audit records, and redaction.
+- `crates/card-spec`: structured fallback card schema.
+- `crates/component-runtime`: Component VM, WXML/WXSS subset compiler, events, and Render IR.
+- `crates/demo-server`: coffee merchant Agent demo server.
+- `crates/dock-cli`: developer CLI and coffee E2E harness.
+- `examples/coffee-skill`: mock MiniApp MCP coffee Skill fixture.
 
 ## Development Commands
 
-The repository pins Rust `1.88.0` through `rust-toolchain.toml` to match the ANP Rust SDK.
+The repository pins Rust `1.88.0` through `rust-toolchain.toml` to match the ANP Rust SDK path dependency.
 
 ```bash
 cargo metadata --format-version 1 --no-deps
 cargo fmt --check
+cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 ```
+
+Focused commands:
+
+```bash
+cargo test -p dock-cli --test coffee_order_flow
+cargo test -p demo-server
+cargo test -p component-runtime component_vm
+```
+
+## CLI
+
+`dock-cli` prints JSON so outputs can be used as validation evidence or piped into other tools.
+
+```bash
+cargo run -p dock-cli -- validate examples/coffee-skill
+cargo run -p dock-cli -- call-api examples/coffee-skill searchDrinks '{}'
+cargo run -p dock-cli -- preview-component examples/coffee-skill components/drink-list/index '{"apiName":"searchDrinks","structuredContent":{"drinks":[{"id":"latte","name":"Latte","price":18}]}}'
+cargo run -p dock-cli -- preview-card '{"content":[{"type":"text","text":"paid"}],"structuredContent":{"orderId":"order_demo_001","status":"paid"}}'
+```
+
+To run the coffee flow against the local demo server:
+
+```bash
+cargo run -p demo-server -- --host 127.0.0.1 --port 3000 --skill examples/coffee-skill
+cargo run -p dock-cli -- run-demo --skill examples/coffee-skill --server http://127.0.0.1:3000
+```
+
+`run-demo` performs demo challenge/login, exercises demo-server coffee business APIs, runs the local Skill API VM through `dock-core`, triggers component `api/call` actions, mock-approves high-risk consent, renders Component VM output to Render IR JSON, and verifies card expiration. Capability tokens are used internally and redacted from CLI output.
+
+## MVP Boundary
+
+The MVP is contract-compatible with the MiniApp MCP Skill shape, not a full WeChat Mini Program runtime.
+
+P0 implemented:
+
+- `SKILL.md`, `mcp.json`, `apis[]`, `components[]`, `_meta.ui.componentPath`.
+- Atomic API JS loading with restricted CommonJS, `wx.modelContext.createSkill`, `registerAPI`, middleware, input validation, timeout, and sandboxed globals.
+- Runtime boundaries for permission, consent, audit, render routing, and model-visible result filtering.
+- ANP DID-aware adapter contracts, signed request helper, allowlist, and scoped capability token cache.
+- Component runtime subset: `Component({})`, `data`, `properties`, `methods`, `created/attached/detached`, `setData`, `NotificationType.Input/Result/Expire`, `sendFollowUpMessage`, `api/call`, `expirePreviousCards`, tap/image events, WXML/WXSS subset, Render IR JSON.
+- CardSpec fallback for structured results or render failures.
+- Coffee merchant demo server and CLI/E2E flow.
+
+P0 intentionally does not implement a real Flutter host, complete WXML/WXSS, full component/page routing, WeChat login, real payment, cloud development, social APIs, or production token standards.
+
+## Security Notes
+
+Do not commit private keys, DID credentials, capability tokens, merchant secrets, or real user data. The coffee Skill and demo server use mock-only data. Runtime code should keep DID signing, tokens, and high-risk authorization below the Skill/CLI boundary, and user-facing output should redact tokens and signatures.
