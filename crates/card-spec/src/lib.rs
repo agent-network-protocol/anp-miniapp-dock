@@ -1,13 +1,9 @@
 #![doc = "CardSpec fallback schema and action model crate."]
 
-pub const CRATE_NAME: &str = "card-spec";
+pub mod actions;
+pub mod fallback;
+pub mod schema;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn exposes_crate_name() {
-        assert_eq!(CRATE_NAME, "card-spec");
-    }
-}
+pub use actions::{CardAction, CardActionKind};
+pub use fallback::{fallback_from_result, FallbackReason};
+pub use schema::{CardItem, CardSection, CardSpec, CardStatus};

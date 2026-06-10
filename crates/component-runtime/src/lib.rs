@@ -1,13 +1,7 @@
 #![doc = "MiniApp MCP Component Runtime, WXML/WXSS subset, events, and Render IR crate."]
 
-pub const CRATE_NAME: &str = "component-runtime";
+pub mod render_ir;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn exposes_crate_name() {
-        assert_eq!(CRATE_NAME, "component-runtime");
-    }
-}
+pub use render_ir::{
+    ComponentAction, RenderEventBinding, RenderEventKind, RenderNode, RenderNodeKind, RenderStyle,
+};
