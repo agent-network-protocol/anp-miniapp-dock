@@ -1,5 +1,6 @@
 use crate::error::DockCoreError;
 use crate::orchestrator::{ApiCallContext, ComponentRenderInput};
+use consent_audit::{ConsentProof, ConsentRequest, RiskLevel};
 use mcp_schema::AtomicApiResult;
 use serde_json::Value;
 
@@ -11,7 +12,11 @@ pub trait RuntimeHost {
 }
 
 pub trait ConsentGate {
-    fn check_consent(&self, context: &ApiCallContext) -> Result<ConsentDecision, DockCoreError>;
+    fn check_consent(
+        &self,
+        context: &ApiCallContext,
+        request: &ConsentRequest,
+    ) -> Result<ConsentDecision, DockCoreError>;
 }
 
 pub trait ApiExecutor {
@@ -61,10 +66,16 @@ pub struct RenderOutcome {
     pub fallback_reason: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct AuditEvent {
+    pub user_did: Option<String>,
+    pub agent_did: Option<String>,
+    pub merchant_did: Option<String>,
     pub session_id: String,
     pub skill_id: String,
     pub api_name: String,
+    pub risk_level: RiskLevel,
+    pub parameter_summary: Value,
+    pub consent_proof: Option<ConsentProof>,
     pub outcome: String,
 }

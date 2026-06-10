@@ -122,6 +122,12 @@ dependencies = [
 [[package]]
 name = "consent-audit"
 version = "0.1.0"
+dependencies = [
+ "mcp-schema",
+ "serde",
+ "serde_json",
+ "thiserror",
+]
 
 [[package]]
 name = "demo-server"
@@ -155,6 +161,7 @@ version = "0.1.0"
 name = "dock-core"
 version = "0.1.0"
 dependencies = [
+ "consent-audit",
  "mcp-schema",
  "serde",
  "serde_json",

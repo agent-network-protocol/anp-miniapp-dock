@@ -1,13 +1,14 @@
 #![doc = "High-risk action consent and audit trail crate."]
 
-pub const CRATE_NAME: &str = "consent-audit";
+pub mod audit;
+pub mod consent;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn exposes_crate_name() {
-        assert_eq!(CRATE_NAME, "consent-audit");
-    }
-}
+pub use audit::{
+    redact_value, AuditError, AuditOutcome, AuditRecord, AuditRecordInput, AuditSink,
+    InMemoryAuditSink,
+};
+pub use consent::{
+    build_consent_request, consent_proof, parameter_digest, ConsentError, ConsentProof,
+    ConsentProvider, ConsentRequest, ConsentRequestInput, ConsentStatus, DecisionConsentProvider,
+    RiskLevel, RiskPolicy,
+};
