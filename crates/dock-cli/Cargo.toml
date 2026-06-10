@@ -7,4 +7,20 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+anp-adapter = { path = "../anp-adapter" }
+card-spec = { path = "../card-spec" }
+clap.workspace = true
+component-runtime = { path = "../component-runtime" }
+consent-audit = { path = "../consent-audit" }
+dock-core = { path = "../dock-core" }
+js-runtime-quickjs = { path = "../js-runtime-quickjs" }
+mcp-schema = { path = "../mcp-schema" }
+serde.workspace = true
+serde_json.workspace = true
+skill-loader = { path = "../skill-loader" }
+thiserror.workspace = true
 
+[dev-dependencies]
+axum.workspace = true
+demo-server = { path = "../demo-server" }
+tokio = { workspace = true, features = ["net"] }
