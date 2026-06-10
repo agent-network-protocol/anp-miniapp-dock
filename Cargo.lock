@@ -129,6 +129,13 @@ version = "0.1.0"
 [[package]]
 name = "dock-core"
 version = "0.1.0"
+dependencies = [
+ "mcp-schema",
+ "serde",
+ "serde_json",
+ "skill-loader",
+ "thiserror",
+]
 
 [[package]]
 name = "fancy-regex"
