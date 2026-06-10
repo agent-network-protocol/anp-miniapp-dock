@@ -2,9 +2,9 @@
 
 ## 1. 背景与目标
 
-本产品面向 aWiki 及 ANP 生态，开发一个“智能体原生小程序容器”。容器的核心目标不是复刻微信小程序运行时，而是在智能体对话场景中承载小程序 MCP（详细讲 (微信小程序mcp)[docs/weichat-miniapp-mcp-protocol/weichat-miniapp-mcp.txt]  ） 形态的 Skill：通过自然语言触发原子接口，返回结构化数据，并以轻量组件卡片完成选择、确认、支付、状态展示等关键交互。
+本产品面向 ANP 生态，开发一个“智能体原生小程序容器”。容器的核心目标不是复刻微信小程序运行时，而是在智能体对话场景中承载小程序 MCP（详细见 [微信小程序 MCP 资料](../weichat-miniapp-mcp-protocol/weichat-miniapp-mcp.txt)）形态的 Skill：通过自然语言触发原子接口，返回结构化数据，并用原子组件运行时子集完成选择、确认、支付、状态展示等关键交互。
 
-微信小程序 AI 开发模式已经证明了“原子接口 + 原子组件 + SKILL + mcp.json”的产品形态：开发者把小程序功能抽象为原子接口和原子组件，并封装成 SKILL，供小程序 AI 通过小程序 MCP 选择和调用。我们的容器将复用这套契约机制，但身份层改为 ANP DID，运行环境由 aWiki/ANP 容器提供。
+微信小程序 AI 开发模式已经证明了“原子接口 + 原子组件 + SKILL + mcp.json”的产品形态：开发者把小程序功能抽象为原子接口和原子组件，并封装成 SKILL，供小程序 AI 通过小程序 MCP 选择和调用。我们的容器将复用这套接口契约，但身份、鉴权、网络和宿主能力由 ANP DID 与 ANP Rust SDK 实现。
 
 微信小程序AI开发指南：https://developers.weixin.qq.com/miniprogram/dev/ai/guide.html
 
@@ -17,8 +17,9 @@
 - 面向 Agent 的小程序 Skill 运行容器；
 - 兼容小程序 MCP 契约；
 - 使用 ANP DID 做登录、鉴权和调用方身份识别；
+- 使用 Rust 独立实现，不依赖 `awiki-deamon`、`im-core` 或 aWiki client 仓库；
 - 支持 JS Sandbox 执行原子接口；
-- 使用轻量卡片组件承载交互，不实现完整传统小程序 UI；
+- 支持小程序 MCP 原子组件运行时子集；
 - MVP 只支持必要组件和必要接口，不完整兼容微信全部 API和组件。
 
 本产品不是：
@@ -26,20 +27,21 @@
 - 不是完整微信小程序运行时；
 - 不是 WXML/WXSS/页面路由完整兼容层；
 - 不是微信账号、微信支付、微信云开发能力的替代实现；
-- 不是传统 App 页面容器。
+- 不是传统 App 页面容器；
+- 不是 aWiki daemon、IM SDK 或客户端状态层。
 
 ## 3. 核心用户与场景
 
 ### 3.1 用户角色
 
-1. **终端用户**：在 aWiki 中通过自然语言调用商家或服务方智能体。
+1. **终端用户**：在支持 ANP Skill 的宿主中通过自然语言调用商家或服务方智能体。
 2. **Skill 开发者**：按照小程序 MCP 结构提供 `SKILL.md`、`mcp.json`、原子接口和组件。
 3. **商家/服务方 Agent**：通过 ANP 暴露服务能力，接收 DID 登录和调用。
-4. **aWiki 容器**：负责发现、鉴权、加载、执行、渲染和授权确认。
+4. **anp-miniapp-dock Runtime**：负责发现、鉴权、加载、执行、渲染和授权确认。
 
 ### 3.2 典型场景
 
-用户在 aWiki 中输入“帮我点一杯少糖拿铁”，aWiki 发现咖啡商家 Agent，使用用户 DID 完成登录，加载该 Agent 的 Skill，调用搜索、选品、确认订单等原子接口，展示订单确认卡片。用户点击确认后，容器触发 human authorization，再调用支付或模拟支付接口，最后展示订单状态卡片。
+用户输入“帮我点一杯少糖拿铁”，Runtime 发现咖啡商家 Agent，使用用户 DID 完成登录，加载该 Agent 的 Skill，调用搜索、选品、确认订单等原子接口，展示订单确认卡片。用户点击确认后，容器触发 human authorization，再调用支付或模拟支付接口，最后展示订单状态卡片。
 
 ## 4. MVP 产品边界
 
@@ -52,16 +54,16 @@
 5. 支持 JS Sandbox 执行原子接口 JS；
 6. 支持原子接口返回 `isError`、`content`、`structuredContent`、`_meta`；
 7. 支持 `_meta.ui.componentPath` 绑定组件；
-8. 支持通用结构化卡片渲染；
+8. 支持小程序 MCP 原子组件运行时子集，包括 P0 WXML/WXSS 子集、基础生命周期、`setData` 和 Render IR，并保留通用结构化卡片 fallback；
 9. 支持 `sendFollowUpMessage` 和 `api/call`；
 10. 支持卡片过期态；
 11. 支持最小 `wx` shim：网络、存储、会话、文件、位置可选；
 12. 高风险动作支持用户确认和审计。
-13. 接口和组件与小程序mcp保持一致
+13. 接口和文件结构尽量与小程序 MCP 保持一致，底层实现替换为 ANP/Rust Runtime。
 
 ### 4.2 MVP 暂不支持
 
-1. 完整 WXML/WXSS 渲染；
+1. 完整 WXML/WXSS 渲染，P0 只支持交易型卡片所需子集；
 2. 完整页面路由、TabBar、多页面生命周期；
 3. 微信登录、微信 openid/unionid；
 4. 微信原生支付收银台；
@@ -73,7 +75,7 @@
 
 ## 5. 兼容策略
 
-“完全兼容小程序 MCP”在 MVP 中定义为**契约兼容**，不是完整运行时兼容。
+“兼容小程序 MCP”在 MVP 中定义为**接口契约兼容优先**，不是完整微信小程序运行时兼容。用户的小程序 MCP Skill 应尽量不改业务代码即可被加载；当底层能力涉及微信登录、微信支付、云开发、设备能力时，由 `wx` 兼容层映射到 ANP DID、capability token、mock payment、宿主能力或 fallback。
 
 必须兼容的契约包括：
 
@@ -90,8 +92,14 @@
 
 对于原子组件，采用两级策略：
 
-1. 如果存在 aWiki 原生组件适配器，MVP版本 执行完整小程序组件代码，则渲染专用卡片；
-2. 否则使用 `structuredContent` 渲染通用结构化卡片。
+1. 主路径是 MiniApp MCP Component Runtime：执行 `Component({})` 子集，解析 WXML/WXSS 子集，输出 Render IR；
+2. 如果存在专用 Rust/native 组件适配器，则可渲染专用卡片；
+3. 否则使用 `structuredContent` 渲染通用 CardSpec；
+4. 最后 fallback 到 `content` 纯文本。
+
+组件运行时的详细设计见 [MiniApp MCP Component Runtime 渲染方案](miniapp-mcp-component-runtime.md)。
+
+MVP 的 P0/P1 支持矩阵、原子接口和原子组件兼容范围见 [小程序 MCP 兼容方案 MVP](miniapp-mcp-compatibility-mvp.md)。
 
 ## 6. 身份与鉴权需求
 
@@ -99,10 +107,10 @@
 
 登录流程：
 
-1. aWiki 发现商家 Agent，一般是在我们服务上有注册；
+1. Runtime 发现商家 Agent，一般是在服务注册表中有注册；
 2. 读取 skill。
-3. 用户 DID 对登录请求或 challenge 签名；
-4. 商家 Agent 验证 DID Document 和签名；
+3. 用户 DID 通过 ANP Rust SDK 对登录请求或 challenge 签名；
+4. 商家 Agent 通过 ANP Rust SDK 验证 DID Document 和签名；
 5. 商家创建或查找 DID 绑定账户；
 6. 商家返回短期 capability token；
 7. 后续 Skill 原子接口调用携带该 token。
@@ -165,13 +173,13 @@ MVP 必须提供 JS Sandbox，用于执行小程序 MCP 原子接口代码。
 - `wx.login` → ANP DID 登录；
 - `wx.checkSession` → capability token 校验；
 - `wx.getPhoneNumber` → 用户授权手机号凭证，MVP 可 mock；
-- `wx.chooseAddress` → aWiki 地址选择器，MVP 可 mock；
+- `wx.chooseAddress` → 宿主地址选择器，MVP 可 mock；
 - `wx.requestPayment` → Payment Intent + 用户确认，MVP 可 mock；
-- `openDetailPage` → aWiki 半屏卡片或 WebView fallback。
+- `openDetailPage` → 宿主半屏卡片或 WebView fallback。
 
 ## 9. 组件与交互需求
 
-MVP 不追求完整 UI，只支持组件卡片。
+MVP 不追求完整小程序 UI，只支持对话流中的原子组件卡片。渲染目标是小程序 MCP 原子组件运行时子集，而不是完整微信组件运行时。
 
 必须支持的卡片能力：
 
@@ -191,9 +199,10 @@ MVP 不追求完整 UI，只支持组件卡片。
 
 组件渲染优先级：
 
-1. 专用 aWiki 原生卡片；
-2. 通用 JSON Card；
-3. 纯文本 fallback。
+1. MiniApp MCP Component Runtime；
+2. 专用 Rust/native 组件适配器；
+3. 通用 CardSpec；
+4. 纯文本 fallback。
 
 ## 10. 安全与风控
 
@@ -208,6 +217,8 @@ Skill 需要声明：
 - 是否需要支付；
 - 是否需要文件/图片；
 - 是否需要动态组件能力。
+
+权限读取必须以兼容小程序 MCP 为前提。原始 `mcp.json` 字段不应被破坏；小程序 MCP 已有能力声明如 `components[].permissions.scope.dynamic` 需要优先识别。ANP 扩展权限可以通过 `_meta.anp` 或 `x_anp` 表达，但不能要求原 Skill 必须重写。
 
 高风险动作必须用户确认，包括：
 
@@ -257,7 +268,7 @@ agent-mini preview-card
 
 MVP 完成后，应至少跑通一个咖啡点单 demo：
 
-1. aWiki 通过 ANP DID 登录商家 Agent；
+1. Runtime 通过 ANP DID 登录商家 Agent；
 2. 容器加载 `SKILL.md` 和 `mcp.json`；
 3. JS Sandbox 注册并执行原子接口；
 4. 用户自然语言触发搜索商品接口；
@@ -275,8 +286,8 @@ MVP 完成后，应至少跑通一个咖啡点单 demo：
 
 MVP 后可逐步支持：
 
-- WXML/WXSS 子集到 Card Schema 转换；
-- 原子组件 JS 的受限执行；
+- 更完整的 WXML/WXSS 子集；
+- 更完整的原子组件 JS、生命周期、事件和 `setData`；
 - 半屏页面 WebView fallback；
 - 更完整的地址、手机号、支付凭证；
 - EID-DID 绑定凭证；
@@ -290,7 +301,7 @@ MVP 后可逐步支持：
 1. Skill-first，不做 Page-first。
 2. Contract-first，不做完整小程序 Runtime-first。
 3. DID-first，用 ANP 身份替代微信登录。
-4. Card-first，不做复杂 UI。
+4. Component-runtime-first，优先支持小程序 MCP 原子组件运行时子集，CardSpec 作为 fallback。
 5. Sandbox-first，执行能力必须安全隔离。
 6. Consent-first，高风险动作必须用户确认。
 7. Compatibility-by-contract，优先兼容小程序 MCP 契约，而不是微信全部 API。

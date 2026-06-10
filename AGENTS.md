@@ -25,7 +25,7 @@ When code is introduced, document the exact local commands here, for example `ca
 
 For Markdown, use ATX headings (`#`, `##`), concise paragraphs, and fenced code blocks with language labels where applicable. Prefer lower-kebab-case filenames for new docs, matching existing files such as `anp-skill-dock-architecture.md`.
 
-Keep terminology consistent with the architecture docs: use `Skill`, `MCP`, `ANP DID`, `wx Shim`, `QuickJS-NG`, `CardSpec`, and `Agentic MiniApp Container`. Preserve exact protocol field names in backticks, for example `SKILL.md`, `mcp.json`, `structuredContent`, `_meta.ui.componentPath`, `sendFollowUpMessage`, and `api/call`.
+Keep terminology consistent with the architecture docs: use `Skill`, `MCP`, `ANP DID`, `ANP Rust SDK`, `wx Compatibility Layer`, `QuickJS-NG`, `MiniApp MCP Component Runtime`, `Render IR`, `CardSpec`, and `Agentic MiniApp Container`. Preserve exact protocol field names in backticks, for example `SKILL.md`, `mcp.json`, `structuredContent`, `_meta.ui.componentPath`, `sendFollowUpMessage`, and `api/call`.
 
 ## Testing Guidelines
 

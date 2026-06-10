@@ -1,47 +1,214 @@
-# anp-skill-dock 整体系统架构设计
+# anp-miniapp-dock 整体系统架构设计
 
 ## 1. 架构目标
 
-`anp-skill-dock` 是一个面向 ANP 生态的智能体原生小程序容器。它的目标不是完整复刻微信小程序运行时，而是兼容小程序 MCP 的核心契约：`SKILL.md`、`mcp.json`、原子接口、原子组件元数据、`content / structuredContent / _meta` 返回结构、`sendFollowUpMessage`、`api/call`、卡片过期态和中间件机制。
+`anp-miniapp-dock` 是一个独立 Rust 仓库，用于在 ANP 生态中运行小程序 MCP 形态的 Agent Skill。它不依赖 `awiki-deamon`、`im-core`，也不要求修改 aWiki client 仓库；工程只直接使用 ANP Rust SDK 处理 DID、签名、发现、鉴权和网络调用能力。
 
-MVP 的核心目标：
+核心目标：
 
-1. 使用 ANP DID 做登录、鉴权、调用方身份识别；
-2. 使用 QuickJS-NG 作为 JS Sandbox，执行小程序 MCP 原子接口；
-3. 兼容小程序 MCP 契约，不完整兼容微信全部 API 和组件；
-4. 使用轻量卡片渲染，不做完整 WXML/WXSS/页面路由；
-5. `wx.request` 等底层网络能力直接集成 ANP DID 身份；
-6. 提供一个服务端 demo，供 aWiki 客户端集成验证。
+1. 兼容小程序 MCP 的接口契约，包括 `SKILL.md`、`mcp.json`、原子接口、原子组件元数据、`content / structuredContent / _meta`、`sendFollowUpMessage`、`api/call`、组件过期态和中间件；
+2. 使用 Rust 构建独立 Skill Runtime、CLI、服务端 demo 和端到端测试；
+3. 使用 QuickJS-NG 执行原子接口 JS，并逐步支持小程序 MCP 原子组件运行时子集；
+4. 底层身份和网络替换为 ANP DID 与 ANP Rust SDK 实现；
+5. 提供咖啡点单 demo，证明加载 Skill、调用原子接口、渲染组件、用户确认、mock 支付和卡片过期可以端到端跑通。
+
+非目标：
+
+- 不实现完整微信小程序 Runtime；
+- 不实现完整 WXML/WXSS/页面路由/TabBar/页面生命周期；
+- 不复刻微信账号、openid/unionid、微信支付收银台或微信云开发；
+- 不承担 aWiki daemon、IM、消息投递或 aWiki 客户端状态职责。
 
 ## 2. 总体架构
 
 ```text
-aWiki Client
-  ├─ ANP DID Wallet
+Rust CLI / Test Runner / Future Host
+  │
+  ▼
+anp-miniapp-dock
   ├─ Skill Loader
-  ├─ QuickJS-NG Sandbox
-  ├─ wx Shim / Capability Broker
-  ├─ Card Renderer
-  └─ Consent & Audit Engine
+  ├─ MCP Contract Validator
+  ├─ Atomic API Runtime
+  │   ├─ QuickJS-NG API VM
+  │   ├─ CommonJS Loader
+  │   └─ Middleware Runner
+  ├─ MiniApp MCP Component Runtime
+  │   ├─ QuickJS-NG Component VM
+  │   ├─ WXML/WXSS Subset Compiler
+  │   ├─ Render IR
+  │   ├─ Flutter Renderer Adapter
+  │   └─ CardSpec Fallback
+  ├─ wx Compatibility Layer
+  ├─ Consent & Audit Engine
+  ├─ Scoped Storage
+  └─ ANP SDK Adapter
         │
         │ ANP DID Auth / Signed HTTP / Capability Token
         ▼
 Demo Merchant Agent Server
   ├─ Agent Registry
   ├─ Skill Package Service
-  ├─ DID Login Service
-  ├─ Skill RPC Service
+  ├─ DID Challenge/Login Service
   ├─ Mock Business APIs
   └─ Audit Log
 ```
 
-整体采用“端侧容器 + 服务端 Agent demo”的架构。aWiki 负责加载 Skill、执行原子接口、渲染卡片和用户授权；服务端负责提供商家 Agent 注册信息、Skill 包、DID 登录校验、模拟商品/订单/支付接口。
+整体采用“独立 Rust Runtime + 服务端 Agent demo”的架构。Runtime 负责加载 Skill、执行原子接口、执行或降级渲染原子组件、处理用户动作、执行授权确认和审计；demo server 负责提供商家 Agent 信息、Skill 包、DID challenge 登录、模拟商品/订单/支付接口。
 
-## 3. 客户端模块设计
+## 3. Rust 工程目录
 
-### 3.1 Skill Loader
+建议使用 Cargo workspace：
 
-负责加载和校验 Skill 包。
+```text
+anp-miniapp-dock/
+  Cargo.toml
+  README.md
+  AGENTS.md
+  docs/
+    architecture/
+    weichat-miniapp-mcp-protocol/
+
+  crates/
+    mcp-schema/
+      src/
+        lib.rs
+        manifest.rs
+        result.rs
+        validation.rs
+      tests/
+        mcp_validation.rs
+
+    dock-core/
+      src/
+        lib.rs
+        orchestrator.rs
+        api_registry.rs
+        host.rs
+        error.rs
+      tests/
+        api_call_flow.rs
+
+    skill-loader/
+      src/
+        lib.rs
+        package.rs
+        resolver.rs
+      tests/
+        coffee_skill_load.rs
+
+    js-runtime-quickjs/
+      src/
+        lib.rs
+        api_vm.rs
+        component_vm.rs
+        commonjs.rs
+        bridge.rs
+        middleware.rs
+      tests/
+        register_api.rs
+        middleware_chain.rs
+
+    wx-compat/
+      src/
+        lib.rs
+        model_context.rs
+        request.rs
+        storage.rs
+        permissions.rs
+      tests/
+        scoped_storage.rs
+        component_permissions.rs
+
+    component-runtime/
+      src/
+        lib.rs
+        loader.rs
+        component_vm.rs
+        wxml.rs
+        wxss.rs
+        render_ir.rs
+        events.rs
+      tests/
+        wxml_bindings.rs
+        set_data.rs
+
+    card-spec/
+      src/
+        lib.rs
+        schema.rs
+        fallback.rs
+        actions.rs
+      tests/
+        order_card.rs
+
+    anp-adapter/
+      src/
+        lib.rs
+        did.rs
+        challenge.rs
+        token.rs
+        signed_request.rs
+      tests/
+        capability_token_scope.rs
+
+    consent-audit/
+      src/
+        lib.rs
+        consent.rs
+        audit.rs
+      tests/
+        payment_requires_consent.rs
+
+    dock-cli/
+      src/
+        main.rs
+        commands.rs
+
+    demo-server/
+      src/
+        main.rs
+        routes.rs
+        auth.rs
+        coffee.rs
+        audit.rs
+      tests/
+        demo_api.rs
+
+  examples/
+    coffee-skill/
+      SKILL.md
+      mcp.json
+      index.js
+      apis/
+        searchDrinks.js
+        confirmOrder.js
+        payOrder.js
+      components/
+        drink-list/
+          index.js
+          index.wxml
+          index.wxss
+          index.json
+        order-confirm/
+        payment-result/
+
+  tests/
+    e2e/
+      coffee_order_flow.rs
+```
+
+## 4. 小程序 MCP 兼容策略
+
+兼容目标分两层：
+
+1. 接口层尽量兼容小程序 MCP。用户原有 Skill 的 `SKILL.md`、`mcp.json`、`index.js`、`apis/*.js`、`components/*`、`Component({})`、`wx.modelContext`、`wx.*` 调用应尽量保持原样。
+2. 实现层替换为 ANP 和 Rust Runtime。微信登录、微信支付、云开发、设备能力等由 `wx Compatibility Layer` 映射为 ANP DID、capability token、mock payment、宿主能力或明确 unsupported/fallback。
+
+`mcp.json` 原始字段必须按小程序 MCP 读取，不为兼容目标强制用户改字段。ANP 扩展能力优先使用兼容扩展位，例如 `_meta.anp` 或 `x_anp`，不得破坏原始小程序 MCP schema。运行时也可以从小程序 MCP 既有字段推导权限，例如 `components[].permissions.scope.dynamic` 打开动态组件能力。
+
+MVP 的详细兼容范围、P0/P1 支持矩阵和验收组件见 [小程序 MCP 兼容方案 MVP](miniapp-mcp-compatibility-mvp.md)。
+
+## 5. Skill Loader
 
 输入：
 
@@ -50,22 +217,21 @@ SKILL.md
 mcp.json
 index.js
 apis/*.js
-components metadata
+components/*/{index.js,index.wxml,index.wxss,index.json}
 ```
 
 职责：
 
-- 解析 `mcp.json.apis[]`；
-- 校验 `name / description / inputSchema / outputSchema`；
-- 校验 `_meta.ui.componentPath`；
-- 加载 `SKILL.md` 作为模型/编排说明；
-- 建立 API name 到 JS handler 的映射；
-- 建立 componentPath 到 Card Renderer 的映射；
-- 生成可供 aWiki Agent 调用的 tool registry。
+- 解析并校验 `mcp.json.apis[]`、`components[]`、`inputSchema`、`outputSchema` 和 `_meta.ui.componentPath`；
+- 读取 `SKILL.md` 作为业务编排说明；
+- 加载 `index.js` 并建立 API name 到 JS handler 的映射；
+- 建立 `componentPath` 到 Component Runtime / native adapter / CardSpec fallback 的渲染路由；
+- 校验 Skill 包路径，禁止跨包 require、路径穿越和远程代码加载；
+- 生成 Runtime 可调用的 API registry。
 
-### 3.2 QuickJS-NG Sandbox
+## 6. Atomic API Runtime
 
-JS 引擎使用 QuickJS-NG。每个 Skill 独立创建 Sandbox 实例，每次原子接口调用创建隔离上下文。
+Atomic API Runtime 使用 QuickJS-NG 执行原子接口 JS。
 
 MVP 支持：
 
@@ -74,89 +240,72 @@ MVP 支持：
 - `wx.modelContext.createSkill(skillPath)`；
 - `skill.registerAPI(name, handler)`；
 - `skill.use(middleware)`；
-- 中间件链式执行；
-- 调用超时，默认 300 秒；
-- console 日志捕获；
-- 异常捕获与结构化错误返回；
-- 每个 Skill 独立 storage namespace。
-
-安全限制：
-
-- 禁止任意文件系统访问；
-- 禁止动态加载远程代码；
-- 禁止直接访问宿主能力；
-- 禁止任意网络访问，必须走 `wx.request`；
-- 网络请求必须通过 domain allowlist；
-- 限制执行时间、内存和调用深度；
-- Sandbox 只能通过 Host Bridge 调用容器能力。
-
-### 3.3 wx Shim / Capability Broker
-
-容器提供有限 `wx` 兼容层。JS 代码调用 `wx.*`，实际由 Host Bridge 转发到 aWiki 原生能力或 ANP 网络能力。
-
-MVP 支持 API 边界：
-
-```text
-wx.modelContext.createSkill
-skill.registerAPI
-skill.use
-wx.modelContext.getSessionId
-wx.modelContext.expireAllCards
-
-wx.request
-wx.getStorage / wx.setStorage
-wx.getStorageSync / wx.setStorageSync
-wx.getStorageInfo
-wx.removeStorage
-wx.clearStorage
-
-wx.downloadFile
-wx.uploadFile
-wx.openDocument
-
-wx.getDeviceInfo
-wx.getAppBaseInfo
-wx.getLocation / wx.getFuzzyLocation，可选授权
-```
-
-替代实现：
-
-```text
-wx.login              → ANP DID 登录
-wx.checkSession       → capability token 校验
-wx.getPhoneNumber     → MVP mock，后续接手机号凭证
-wx.chooseAddress      → MVP mock，后续接地址选择器
-wx.requestPayment     → MVP mock Payment Intent + 用户确认
-openDetailPage        → MVP WebView / 半屏卡片 fallback
-```
-
-暂不支持：
-
-```text
-微信云开发
-微信原生支付
-公众号/视频号/客服
-广告
-跳转其他小程序
-蓝牙/WiFi/TCP/UDP
-完整地图交互
-完整页面路由和生命周期
-```
-
-### 3.4 ANP DID 网络层
-
-所有由 Skill 发出的网络请求统一经过 `AnpHttpClient`。
+- 中间件按注册顺序执行，外层到内层再回到外层；
+- 每次原子接口调用有独立调用上下文；
+- input/output schema 校验；
+- console 日志捕获、异常捕获、结构化错误返回；
+- 调用超时，默认与小程序 MCP 语义对齐为 300 秒。
 
 调用链：
 
 ```text
-JS wx.request
-  → Host Bridge
-  → Permission Check
-  → AnpHttpClient
-  → DID Signature / Capability Token
-  → HTTP Request
+api/call or model decision
+  → Orchestrator
+  → inputSchema validation
+  → permission check
+  → consent gate when risky
+  → middleware chain
+  → QuickJS API handler
+  → wx Compatibility Layer
+  → ANP SDK Adapter / demo server
+  → result validation
+  → component render routing
 ```
+
+## 7. MiniApp MCP Component Runtime
+
+渲染主线改为小程序 MCP 原子组件运行时子集，而不是纯 CardSpec。详细方案见 [miniapp-mcp-component-runtime.md](miniapp-mcp-component-runtime.md)。
+
+渲染优先级：
+
+1. MiniApp MCP Component Runtime：执行 Component JS，解析 WXML/WXSS 子集，输出 Render IR；
+2. 专用 Rust/native component adapter；
+3. `structuredContent -> CardSpec` fallback；
+4. `content -> text` fallback。
+
+这个设计保证接口层尽量兼容小程序 MCP，同时允许实现层先覆盖常见交易型卡片，再逐步提高组件兼容性。
+
+## 8. wx Compatibility Layer
+
+原子接口环境和原子组件环境必须隔离，不共享 JS 全局变量。
+
+Atomic API VM 默认支持：
+
+- `wx.request`；
+- `wx.getStorage` / `wx.setStorage` / Sync 版本；
+- `wx.getStorageInfo` / `wx.removeStorage` / `wx.clearStorage`；
+- `wx.modelContext.createSkill`；
+- `wx.modelContext.getSessionId`；
+- `wx.modelContext.expireAllCards`；
+- `wx.login` 映射为 ANP DID 登录；
+- `wx.checkSession` 映射为 capability token 校验；
+- `wx.requestPayment` 映射为 Payment Intent + consent + mock payment。
+
+Component VM 默认支持：
+
+- `wx.modelContext.getContext(this)`；
+- `wx.modelContext.getViewContext(this)`；
+- `sendFollowUpMessage`；
+- `api/call` 内容块；
+- `expirePreviousCards` / `expireAllCards`；
+- storage 和设备信息子集；
+- tap、image load、image error 事件。
+
+Component VM 默认不开放 `wx.request` 和 timer。只有当组件声明动态能力，例如小程序 MCP 的 `components[].permissions.scope.dynamic`，才开放受限 request/timer 子集。
+
+## 9. ANP SDK Adapter
+
+所有 DID、签名、Agent 发现、challenge 登录、capability token、Signed HTTP 能力优先通过 ANP Rust SDK 实现。`anp-miniapp-dock` 不自建一套独立 DID 协议。
 
 规则：
 
@@ -164,124 +313,12 @@ JS wx.request
 - 首次访问商家服务时走 DID challenge 登录；
 - 登录成功后缓存短期 token；
 - token 按商家 DID、用户 DID、Skill ID 隔离；
-- 第三方域名请求必须在 Skill permission manifest 中声明；
-- 高风险接口必须由 Consent Engine 先完成用户确认。
+- 第三方域名请求必须命中权限 allowlist；
+- 高风险接口必须先通过 Consent Engine。
 
-## 4. 渲染引擎方案
+## 10. 服务端 Demo 架构
 
-### 4.1 推荐方案：CardSpec Renderer
-
-MVP 不实现 WXML/WXSS 渲染，而实现一个 `CardSpec Renderer`。这是最适合一两天用 Codex 落地的方案。
-
-核心思想：
-
-```text
-structuredContent + _meta + componentPath
-  → Component Adapter
-  → CardSpec JSON
-  → Flutter Native Card
-```
-
-渲染优先级：
-
-1. `componentPath` 命中特定适配器，渲染专用卡片；
-2. 未命中时，根据 `structuredContent` 自动生成通用 JSON Card；
-3. 如果结构无法识别，降级为 `content` 文本消息。
-
-### 4.2 CardSpec MVP 组件
-
-MVP 只支持以下组件：
-
-```text
-Text
-Image
-List
-Button
-ActionBar
-RadioGroup
-CheckboxGroup
-FormInput
-PriceBlock
-OrderSummary
-StatusBlock
-ErrorBlock
-ExpireOverlay
-```
-
-事件能力：
-
-```text
-sendFollowUpMessage
-api/call
-expireCard
-openDetailPage fallback
-humanAuthorization
-```
-
-示例：
-
-```json
-{
-  "type": "order_summary",
-  "title": "确认订单",
-  "items": [
-    { "name": "拿铁", "spec": "中杯 / 少糖", "quantity": 1, "price": 18 }
-  ],
-  "payable": 18,
-  "actions": [
-    {
-      "type": "api/call",
-      "label": "确认支付",
-      "api": "payOrder",
-      "arguments": { "orderId": "o_001" },
-      "risk": "payment"
-    }
-  ],
-  "expirable": true
-}
-```
-
-### 4.3 后续渲染演进
-
-MVP 后可增加：
-
-- WXML/WXSS 子集到 CardSpec 的转换；
-- 原子组件 JS 的受限执行；
-- WebView 半屏页面 fallback；
-- 更复杂的动态组件；
-- Flutter 原生组件市场。
-
-## 5. 原子接口调用流程
-
-```text
-1. 用户在 aWiki 中发起自然语言请求
-2. aWiki Agent 根据 SKILL.md + mcp.json 选择原子接口
-3. Skill Runtime 校验 inputSchema
-4. QuickJS-NG 执行 API handler
-5. handler 内部通过 wx.request 调商家服务
-6. AnpHttpClient 自动附加 DID 身份
-7. handler 返回 isError/content/structuredContent/_meta
-8. Card Renderer 根据 componentPath 渲染卡片
-9. 用户点击卡片按钮
-10. 触发 sendFollowUpMessage 或 api/call
-11. 高风险动作进入 Consent Engine
-12. 用户确认后继续调用后续原子接口
-```
-
-## 6. 服务端 Demo 架构
-
-MVP 需要创建一个服务端示例项目：`anp-skill-dock-demo-server`。
-
-服务端职责：
-
-- 提供商家 Agent 注册信息；
-- 提供 Skill 包下载；
-- 提供 DID challenge 登录；
-- 验证 DID 签名；
-- 签发 capability token；
-- 提供咖啡点单模拟 API；
-- 提供订单和支付 mock；
-- 输出审计日志。
+MVP 在同一 Rust workspace 内提供 `demo-server` crate。
 
 建议接口：
 
@@ -301,83 +338,69 @@ POST /api/order/pay
 GET  /api/order/{orderId}
 ```
 
-Skill 包示例结构：
+Demo 闭环：
 
 ```text
-coffee-skill/
-  SKILL.md
-  mcp.json
-  index.js
-  apis/
-    searchDrinks.js
-    confirmOrder.js
-    payOrder.js
-  components/
-    drink-list/
-    order-confirm/
-    payment-result/
+searchDrinks
+  → drink-list component
+  → bindtap / sendFollowUpMessage / api/call
+  → confirmOrder
+  → order-confirm component
+  → consent
+  → payOrder
+  → payment-result component
+  → expire previous order card
 ```
 
-Demo 业务闭环：
+## 11. 开发命令
+
+Cargo workspace 创建后的建议命令：
+
+```bash
+cargo test --workspace
+cargo run -p demo-server
+cargo run -p dock-cli -- validate examples/coffee-skill
+cargo run -p dock-cli -- call-api examples/coffee-skill searchDrinks '{}'
+cargo run -p dock-cli -- run-demo --skill examples/coffee-skill --server http://127.0.0.1:3000
+```
+
+`dock-cli` 子命令建议：
 
 ```text
-searchDrinks → 渲染饮品列表
-confirmOrder → 渲染订单确认卡
-payOrder → 用户确认 → mock 支付 → 渲染支付结果
-expireAllCards → 旧确认卡过期
+validate
+run-skill
+call-api
+preview-component
+preview-card
+run-demo
 ```
 
-## 7. 权限与风控
+## 12. 分阶段落地
 
-Skill 必须声明权限：
+P0：第一个 MVP
 
-```json
-{
-  "permissions": {
-    "network": ["https://demo.example.com"],
-    "storage": true,
-    "location": false,
-    "phoneNumber": false,
-    "address": false,
-    "payment": true
-  }
-}
-```
+- 完整支持原子接口契约与执行：`Skill Loader`、`mcp.json.apis[]`、`inputSchema` 校验、`index.js / apis/*.js`、`createSkill`、`registerAPI`、`use middleware`、`AtomicApiResult`、`wx.request + ANP DID`、storage、`getSessionId`、`expireAllCards`、错误处理、超时控制和日志捕获；
+- 支持原子组件运行时最小子集：`componentPath` 解析、`components[]` 元数据、`Component({})`、`data/properties/methods`、`created/attached/detached`、`setData`、`getContext/getViewContext`、`Input/Result/Expire`、`view/text/image/button/scroll-view`、`wx:if/wx:for`、`{{path}}` binding、`bindtap`、基础 WXSS、Render IR、Flutter Renderer Adapter；
+- 保留 `CardSpec / structuredContent / content` fallback；
+- 跑通咖啡点单 demo 的 `drink-list`、`order-confirm`、`payment-result` 三张组件卡片。
 
-运行时规则：
+P1：能力补全
 
-- 未声明权限不可调用对应能力；
-- 网络请求必须命中 allowlist；
-- 支付、下单、地址、手机号等动作必须用户确认；
-- 所有高风险动作生成审计记录；
-- 审计记录包含用户 DID、商家 DID、Skill ID、API name、参数摘要、确认时间、执行结果。
+- 原子接口支持 `format:image/file`、`chooseMedia`、`previewMedia`、`scanCode`、`makePhoneCall`、真实 `chooseAddress`、真实 `getPhoneNumber`、真实 Payment Intent 和 WebSocket 子集；
+- 原子组件支持 `openDetailPage` fallback、`preloadDetailPage`、`Overflow`、`scope.dynamic`、组件内受限 `wx.request`、timer、map preview、canvas static、input/radio/checkbox/picker。
 
-## 8. 一两天落地路径
+P2：兼容性扩展
 
-第一天：
+- 支持更多 WXML 表达式、选择器、组件嵌套和更完整 WXSS；
+- 引入更多交易型 Skill 兼容测试集；
+- 继续保持不做完整微信小程序运行时、完整页面路由、完整半屏小程序页面和微信社交生态 API。
 
-1. 创建 `anp-skill-dock` 客户端模块骨架；
-2. 集成 QuickJS-NG；
-3. 实现 `createSkill/registerAPI/use`；
-4. 实现 Skill Loader；
-5. 实现 `wx.request`、storage、console bridge；
-6. 实现 demo server 的 mcp.json、SKILL.md 和 mock API。
+## 13. 关键设计原则
 
-第二天：
-
-1. 实现 CardSpec Renderer；
-2. 实现 `sendFollowUpMessage` 和 `api/call`；
-3. 实现 DID login mock 或接入现有 ANP DID；
-4. 实现 `AnpHttpClient` 自动带身份；
-5. 跑通咖啡点单闭环；
-6. 输出 demo 运行说明和测试用例。
-
-## 9. 关键设计原则
-
-1. Contract-first：优先兼容小程序 MCP 契约。
-2. DID-first：身份、网络、会话都围绕 ANP DID。
-3. Sandbox-first：所有 Skill JS 必须隔离执行。
-4. Card-first：不做完整页面，只做卡片交互。
-5. Permission-first：所有宿主能力必须声明和校验。
-6. Consent-first：高风险动作必须用户确认。
-7. Demo-first：先跑通端到端闭环，再扩展组件/API。
+1. Independent Rust Runtime：新仓库独立实现，不依赖 `awiki-deamon`、`im-core` 或 aWiki client。
+2. ANP SDK First：DID、签名、认证和网络优先复用 ANP Rust SDK。
+3. MCP Interface Compatibility：接口和文件结构尽量兼容小程序 MCP，不要求 Skill 作者重写业务代码。
+4. Implementation Substitution：底层能力由 ANP/Rust Runtime 替换微信实现。
+5. Component Runtime First：渲染主线是小程序 MCP 原子组件运行时子集，CardSpec 是 fallback。
+6. Sandbox First：原子接口和组件运行在隔离 JS 上下文。
+7. Consent First：下单、支付、地址、手机号、身份绑定等高风险动作必须用户确认和审计。
