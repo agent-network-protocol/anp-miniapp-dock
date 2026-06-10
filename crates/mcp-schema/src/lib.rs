@@ -1,13 +1,12 @@
 #![doc = "MiniApp MCP manifest, result, and validation contract crate."]
 
-pub const CRATE_NAME: &str = "mcp-schema";
+pub mod manifest;
+pub mod result;
+pub mod validation;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn exposes_crate_name() {
-        assert_eq!(CRATE_NAME, "mcp-schema");
-    }
-}
+pub use manifest::{ApiDeclaration, ComponentDeclaration, ManifestMeta, SkillManifest, UiMeta};
+pub use result::{AtomicApiResult, ModelVisibleApiResult, TextContent};
+pub use validation::{
+    validate_api_result, validate_input, validate_manifest, validate_manifest_with_component_paths,
+    validate_output_warning, ValidationIssue, ValidationIssueLevel, ValidationReport,
+};
