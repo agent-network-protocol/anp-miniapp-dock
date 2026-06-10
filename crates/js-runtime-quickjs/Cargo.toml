@@ -7,4 +7,10 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
-
+dock-core = { path = "../dock-core" }
+mcp-schema = { path = "../mcp-schema" }
+rquickjs.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+skill-loader = { path = "../skill-loader" }
+thiserror.workspace = true

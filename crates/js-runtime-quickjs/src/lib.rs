@@ -1,13 +1,12 @@
 #![doc = "QuickJS-backed Atomic API VM and Component VM integration crate."]
 
-pub const CRATE_NAME: &str = "js-runtime-quickjs";
+pub mod api_vm;
+pub mod bridge;
+pub mod commonjs;
+pub mod middleware;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn exposes_crate_name() {
-        assert_eq!(CRATE_NAME, "js-runtime-quickjs");
-    }
-}
+pub use api_vm::{
+    ApiCall, ApiVm, ApiVmConfig, ApiVmError, ConsoleEntry, ConsoleLevel, ExecutionTrace,
+    QuickJsApiExecutor, RegisteredApi,
+};
+pub use commonjs::{CommonJsModule, CommonJsModules};
