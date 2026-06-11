@@ -48,7 +48,21 @@
 2. **每个阶段的整体计划**：说明阶段目标、主要工作包、产出物和验收门槛。
 3. **每个阶段中的具体细分小阶段及实施方案**：拆成可执行的开发迭代单元。
 
-### 2.1 总体路线图
+### 2.1 详细阶段文档
+
+每个阶段的可执行开发计划已展开到独立目录：[`production-readiness/`](production-readiness/README.md)。后续开发应以该目录中的阶段文档作为 issue 拆分和验收依据。
+
+| 阶段 | 详细计划 |
+|---|---|
+| Phase 0 | [基线冻结与产品化门槛](production-readiness/phase-0-baseline-and-gates.md) |
+| Phase 1 | [接口对齐与 wx Capability Broker](production-readiness/phase-1-wx-capability-broker.md) |
+| Phase 2 | [组件运行时对齐](production-readiness/phase-2-component-runtime-alignment.md) |
+| Phase 3 | [安全增强与可信执行](production-readiness/phase-3-security-hardening.md) |
+| Phase 4 | [生产运行时与 Host 接入](production-readiness/phase-4-runtime-host-integration.md) |
+| Phase 5 | [开发者体验与生态兼容](production-readiness/phase-5-developer-experience.md) |
+| Phase 6 | [观测、性能与发布运营](production-readiness/phase-6-observability-release.md) |
+
+### 2.2 总体路线图
 
 | 阶段 | 名称 | 核心目标 | 主要产出 | 完成标志 |
 |---|---|---|---|---|

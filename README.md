@@ -14,6 +14,7 @@ The MVP is now implemented as a Cargo workspace. It can load a MiniApp MCP-style
 - [Local demo runbook](docs/runbook/local-demo.md)
 - [Security runbook](docs/runbook/security.md)
 - [Production readiness roadmap](docs/plan/production-readiness-roadmap.md)
+  - [Detailed production readiness phase plans](docs/plan/production-readiness/README.md)
 
 ## Workspace Layout
 
