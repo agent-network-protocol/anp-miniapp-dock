@@ -8,6 +8,8 @@ repository.workspace = true
 
 [dependencies]
 anp.workspace = true
+jsonwebtoken.workspace = true
+rand.workspace = true
 reqwest = { workspace = true, features = ["blocking"] }
 serde.workspace = true
 serde_json.workspace = true

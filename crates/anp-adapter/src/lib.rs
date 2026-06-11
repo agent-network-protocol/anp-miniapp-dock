@@ -21,4 +21,10 @@ pub use signed_request::{
     redact_for_log, AnpHttpClient, AnpRequestBroker, AnpRequestError, AuthMaterial, HttpTransport,
     ReqwestHttpTransport, SignedRequestPolicy, TransportRequest, TransportResponse,
 };
-pub use token::{CapabilityToken, CapabilityTokenCache, CapabilityTokenScope, InMemoryTokenCache};
+pub use token::{
+    bearer_token_expiry_ms, CapabilityToken, CapabilityTokenCache, CapabilityTokenClaims,
+    CapabilityTokenError, CapabilityTokenIssueOutcome, CapabilityTokenIssuer,
+    CapabilityTokenIssuerConfig, CapabilityTokenRequest, CapabilityTokenScope,
+    CapabilityTokenVerifier, CapabilityTokenVerifierConfig, ExpectedCapability, InMemoryTokenCache,
+    CAPABILITY_TOKEN_VERSION, DEFAULT_CAPABILITY_TOKEN_TTL_MS,
+};

@@ -1,5 +1,7 @@
 use crate::did::{DidCredentialError, DidCredentialProvider, IdentitySession};
-use crate::token::{CapabilityToken, CapabilityTokenCache, CapabilityTokenScope};
+use crate::token::{
+    bearer_token_expiry_ms, CapabilityToken, CapabilityTokenCache, CapabilityTokenScope,
+};
 use anp::authentication::{AuthMode, DIDWbaAuthHeader};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
@@ -280,10 +282,12 @@ where
     }
 
     fn token_scope(&self) -> CapabilityTokenScope {
-        CapabilityTokenScope::new(
+        CapabilityTokenScope::for_subject(
             self.session.merchant_did.clone(),
             self.session.user_did.clone(),
+            self.session.agent_did.clone(),
             self.session.skill_id.clone(),
+            Some(self.session.session_id.clone()),
         )
     }
 }
@@ -371,7 +375,10 @@ fn extract_token(headers: &BTreeMap<String, String>) -> Option<CapabilityToken> 
             header_value(headers, "Authorization")
                 .and_then(|value| value.strip_prefix("Bearer ").map(ToOwned::to_owned))
         })
-        .map(|value| CapabilityToken::new(value, None))
+        .map(|value| {
+            let expires_at_ms = bearer_token_expiry_ms(&value);
+            CapabilityToken::new(value, expires_at_ms)
+        })
 }
 
 fn parse_authentication_info_token(value: &str) -> Option<String> {

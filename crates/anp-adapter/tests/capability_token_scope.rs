@@ -1,8 +1,9 @@
 use anp::authentication::{create_did_wba_document, DidDocumentOptions};
 use anp_adapter::{
     redact_for_log, AnpHttpClient, AnpRequestBroker, AnpRequestError, CapabilityTokenCache,
-    DidCredential, DidCredentialError, DidCredentialProvider, HttpTransport, IdentitySession,
-    InMemoryTokenCache, SignedRequestPolicy, TransportRequest, TransportResponse,
+    CapabilityTokenIssuer, CapabilityTokenIssuerConfig, CapabilityTokenRequest, DidCredential,
+    DidCredentialError, DidCredentialProvider, HttpTransport, IdentitySession, InMemoryTokenCache,
+    SignedRequestPolicy, TransportRequest, TransportResponse,
 };
 use serde_json::json;
 use std::cell::RefCell;
@@ -51,20 +52,28 @@ fn token_cache_hit_uses_bearer_and_keeps_scope_isolated() {
     let token_cache = InMemoryTokenCache::new();
     let session = identity_session();
     token_cache.put(
-        anp_adapter::CapabilityTokenScope::new(
-            session.merchant_did.clone(),
-            session.user_did.clone(),
-            session.skill_id.clone(),
-        ),
+        token_scope(&session),
         anp_adapter::CapabilityToken::new("coffee-token", None),
     );
     token_cache.put(
-        anp_adapter::CapabilityTokenScope::new(
+        anp_adapter::CapabilityTokenScope::for_subject(
             session.merchant_did.clone(),
             session.user_did.clone(),
+            session.agent_did.clone(),
             "tea",
+            Some(session.session_id.clone()),
         ),
         anp_adapter::CapabilityToken::new("tea-token", None),
+    );
+    token_cache.put(
+        anp_adapter::CapabilityTokenScope::for_subject(
+            session.merchant_did.clone(),
+            session.user_did.clone(),
+            session.agent_did.clone(),
+            session.skill_id.clone(),
+            Some("session-2".to_owned()),
+        ),
+        anp_adapter::CapabilityToken::new("other-session-token", None),
     );
     let transport = MockTransport::new(vec![TransportResponse::json(
         200,
@@ -118,6 +127,7 @@ fn initial_request_uses_http_signature_when_token_missing() {
 
 #[test]
 fn challenge_401_retries_with_server_nonce_and_caches_token() {
+    let jwt = issue_test_token(4_000_000_000_000);
     let mut challenge_headers = BTreeMap::new();
     challenge_headers.insert(
         "WWW-Authenticate".to_owned(),
@@ -130,7 +140,7 @@ fn challenge_401_retries_with_server_nonce_and_caches_token() {
     let mut success_headers = BTreeMap::new();
     success_headers.insert(
         "Authentication-Info".to_owned(),
-        r#"access_token="fresh-token", token_type="Bearer""#.to_owned(),
+        format!(r#"access_token="{jwt}", token_type="Bearer""#),
     );
     let transport = MockTransport::new(vec![
         TransportResponse {
@@ -166,14 +176,11 @@ fn challenge_401_retries_with_server_nonce_and_caches_token() {
     assert!(retry_signature_input.contains("server-nonce"));
     assert!(calls[1].headers.contains_key("Content-Digest"));
     assert_eq!(
-        token_cache
-            .get(&anp_adapter::CapabilityTokenScope::new(
-                "did:wba:merchant.example",
-                "did:wba:user.example",
-                "coffee"
-            ))
-            .map(|token| token.value),
-        Some("fresh-token".to_owned())
+        token_cache.get(&token_scope(&identity_session())),
+        Some(anp_adapter::CapabilityToken::new(
+            jwt,
+            Some(4_000_000_300_000)
+        ))
     );
 }
 
@@ -181,11 +188,7 @@ fn challenge_401_retries_with_server_nonce_and_caches_token() {
 fn cached_bearer_401_clears_token_and_retries_with_signature() {
     let session = identity_session();
     let token_cache = InMemoryTokenCache::new();
-    let scope = anp_adapter::CapabilityTokenScope::new(
-        session.merchant_did.clone(),
-        session.user_did.clone(),
-        session.skill_id.clone(),
-    );
+    let scope = token_scope(&session);
     token_cache.put(
         scope.clone(),
         anp_adapter::CapabilityToken::new("stale-token", None),
@@ -331,6 +334,43 @@ fn identity_session() -> IdentitySession {
         "coffee",
         "session-1",
     )
+}
+
+fn token_scope(session: &IdentitySession) -> anp_adapter::CapabilityTokenScope {
+    anp_adapter::CapabilityTokenScope::for_subject(
+        session.merchant_did.clone(),
+        session.user_did.clone(),
+        session.agent_did.clone(),
+        session.skill_id.clone(),
+        Some(session.session_id.clone()),
+    )
+}
+
+fn issue_test_token(now_ms: u64) -> String {
+    let session = identity_session();
+    CapabilityTokenIssuer::new(
+        CapabilityTokenIssuerConfig::new(
+            "did:wba:merchant.example",
+            "did:wba:merchant.example",
+            "test-only-capability-token-secret-do-not-use-in-production",
+        )
+        .with_ttl_ms(300_000),
+    )
+    .expect("issuer config")
+    .issue_at(
+        CapabilityTokenRequest::new(
+            session.merchant_did,
+            session.user_did,
+            session.agent_did,
+            session.skill_id,
+            session.session_id,
+            ["coffee:drinks:read"],
+        ),
+        now_ms,
+    )
+    .expect("token issues")
+    .token
+    .value
 }
 
 struct DidFixture {
