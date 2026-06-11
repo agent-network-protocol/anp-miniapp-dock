@@ -292,6 +292,43 @@ struct PipelineStep: Identifiable, Sendable {
     }
 }
 
+struct CoffeeDrink: Identifiable, Sendable, Equatable {
+    let id: String
+    let name: String
+    let price: Int
+    let image: String
+}
+
+struct CoffeeDrinkListCard: Sendable, Equatable {
+    let drinks: [CoffeeDrink]
+    let contentText: String
+    let componentPath: String
+    let authSummary: String
+}
+
+struct CoffeeOrderCard: Sendable, Equatable {
+    let orderId: String
+    let drinkId: String
+    let payable: Int
+    let contentText: String
+    let componentPath: String
+    let authSummary: String
+}
+
+struct CoffeePaymentCard: Sendable, Equatable {
+    let orderId: String
+    let status: String
+    let contentText: String
+    let componentPath: String
+    let authSummary: String
+}
+
+enum CoffeeInteractiveCard: Sendable, Equatable {
+    case drinkList(CoffeeDrinkListCard)
+    case orderConfirm(CoffeeOrderCard)
+    case paymentResult(CoffeePaymentCard)
+}
+
 enum SnapshotParseError: LocalizedError {
     case invalidJSON(label: String)
 

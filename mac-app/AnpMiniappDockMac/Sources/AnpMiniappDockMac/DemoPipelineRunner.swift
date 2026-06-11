@@ -7,6 +7,51 @@ struct PipelineRunResult: Sendable {
 }
 
 struct DemoPipelineRunner {
+    func startInteractiveSessionAsync() async throws -> CoffeeInteractiveRuntime {
+        try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    continuation.resume(returning: try startInteractiveSession())
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
+    func startInteractiveSession() throws -> CoffeeInteractiveRuntime {
+        guard let repoRoot = RepoLocator.findRepoRoot() else {
+            throw DemoPipelineError.repoRootNotFound
+        }
+
+        var logLines = [
+            "repo root: \(repoRoot.path(percentEncoded: false))",
+            "loading Skill with dock-cli validate..."
+        ]
+        let validate = try ProcessRunner.runCargo(
+            ["run", "-q", "-p", "dock-cli", "--", "validate", "examples/coffee-skill"],
+            currentDirectory: repoRoot,
+            timeout: 180
+        )
+        logLines.append("validate: ok")
+
+        let server = try startDemoServer(repoRoot: repoRoot)
+        logLines.append("localhost coffee service: \(server.url)")
+        logLines.append("auth provider: \(server.authProvider)")
+        logLines.append("interactive mode: waiting for user card actions")
+
+        if !validate.stderr.trimmed().isEmpty {
+            logLines.append("validate stderr: \(validate.stderr.trimmed().redactedForDisplay().prefixText(220))")
+        }
+
+        return CoffeeInteractiveRuntime(
+            repoRoot: repoRoot,
+            server: server,
+            validateOutput: validate.stdout,
+            logLines: logLines
+        )
+    }
+
     func runAsync() async throws -> PipelineRunResult {
         try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
@@ -230,6 +275,178 @@ struct DemoPipelineRunner {
     }
 }
 
+final class CoffeeInteractiveRuntime: @unchecked Sendable {
+    let repoRoot: URL
+    let server: RunningDemoServer
+    let validateOutput: String
+    private(set) var logLines: [String]
+    private var isStopped = false
+
+    var serverURL: String {
+        server.url
+    }
+
+    var authProvider: String {
+        server.authProvider
+    }
+
+    init(repoRoot: URL, server: RunningDemoServer, validateOutput: String, logLines: [String]) {
+        self.repoRoot = repoRoot
+        self.server = server
+        self.validateOutput = validateOutput
+        self.logLines = logLines
+    }
+
+    deinit {
+        stop()
+    }
+
+    func stop() {
+        guard !isStopped else { return }
+        isStopped = true
+        server.stop()
+    }
+
+    func searchDrinks(query: String) async throws -> CoffeeDrinkListCard {
+        try await runOnWorker {
+            let output = try self.callAPI(
+                name: "searchDrinks",
+                arguments: [
+                    "query": query,
+                    "serverUrl": self.server.url
+                ]
+            )
+            return try Self.parseDrinkList(output)
+        }
+    }
+
+    func confirmOrder(drinkId: String) async throws -> CoffeeOrderCard {
+        try await runOnWorker {
+            let output = try self.callAPI(
+                name: "confirmOrder",
+                arguments: [
+                    "drinkId": drinkId,
+                    "remoteBaseUrl": self.server.url
+                ]
+            )
+            return try Self.parseOrder(output)
+        }
+    }
+
+    func payOrder(orderId: String) async throws -> CoffeePaymentCard {
+        try await runOnWorker {
+            let output = try self.callAPI(
+                name: "payOrder",
+                arguments: [
+                    "orderId": orderId,
+                    "remoteBaseUrl": self.server.url
+                ]
+            )
+            return try Self.parsePayment(output)
+        }
+    }
+
+    private func runOnWorker<T>(_ work: @escaping () throws -> T) async throws -> T {
+        try await withCheckedThrowingContinuation { continuation in
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    continuation.resume(returning: try work())
+                } catch {
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
+    private func callAPI(name: String, arguments: [String: Any]) throws -> [String: Any] {
+        let data = try JSONSerialization.data(withJSONObject: arguments, options: [.sortedKeys])
+        let jsonArgs = String(data: data, encoding: .utf8) ?? "{}"
+        logLines.append("calling Skill API interactively: \(name)")
+        let result = try ProcessRunner.runCargo(
+            [
+                "run", "-q", "-p", "dock-cli", "--", "call-api",
+                "examples/coffee-skill",
+                name,
+                jsonArgs
+            ],
+            currentDirectory: repoRoot,
+            timeout: 240
+        )
+        if !result.stderr.trimmed().isEmpty {
+            logLines.append("\(name) stderr: \(result.stderr.trimmed().redactedForDisplay().prefixText(220))")
+        }
+        let output = try JSONObject.parse(result.stdout, label: "dock-cli call-api \(name)")
+        if output.string("status", default: "unknown") != "ok" {
+            throw DemoPipelineError.commandFailed("dock-cli call-api \(name) returned non-ok status")
+        }
+        return output
+    }
+
+    private static func parseDrinkList(_ output: [String: Any]) throws -> CoffeeDrinkListCard {
+        let result = output.dictionary("result")
+        let structured = result.dictionary("structuredContent")
+        let drinks = structured.array("drinks").compactMap { item -> CoffeeDrink? in
+            guard let drink = item as? [String: Any] else { return nil }
+            let id = drink.string("id", default: "")
+            guard !id.trimmed().isEmpty else { return nil }
+            return CoffeeDrink(
+                id: id,
+                name: drink.string("name", default: id),
+                price: drink["price"] as? Int ?? (drink["price"] as? NSNumber)?.intValue ?? 0,
+                image: drink.string("image", default: "")
+            )
+        }
+        return CoffeeDrinkListCard(
+            drinks: drinks,
+            contentText: contentText(result, fallback: "请选择一杯咖啡。"),
+            componentPath: componentPath(output, fallback: "components/drink-list/index"),
+            authSummary: authSummary(result)
+        )
+    }
+
+    private static func parseOrder(_ output: [String: Any]) throws -> CoffeeOrderCard {
+        let result = output.dictionary("result")
+        let structured = result.dictionary("structuredContent")
+        return CoffeeOrderCard(
+            orderId: structured.string("orderId", default: "unknown"),
+            drinkId: structured.string("drinkId", default: "unknown"),
+            payable: structured["payable"] as? Int ?? (structured["payable"] as? NSNumber)?.intValue ?? 0,
+            contentText: contentText(result, fallback: "请确认订单。"),
+            componentPath: componentPath(output, fallback: "components/order-confirm/index"),
+            authSummary: authSummary(result)
+        )
+    }
+
+    private static func parsePayment(_ output: [String: Any]) throws -> CoffeePaymentCard {
+        let result = output.dictionary("result")
+        let structured = result.dictionary("structuredContent")
+        return CoffeePaymentCard(
+            orderId: structured.string("orderId", default: "unknown"),
+            status: structured.string("status", default: "unknown"),
+            contentText: contentText(result, fallback: "支付完成。"),
+            componentPath: componentPath(output, fallback: "components/payment-result/index"),
+            authSummary: authSummary(result)
+        )
+    }
+
+    private static func contentText(_ result: [String: Any], fallback: String) -> String {
+        result.array("content")
+            .compactMap { ($0 as? [String: Any])?.string("text", default: "") }
+            .first { !$0.trimmed().isEmpty } ?? fallback
+    }
+
+    private static func componentPath(_ output: [String: Any], fallback: String) -> String {
+        output.dictionary("render").string("componentPath", default: fallback)
+    }
+
+    private static func authSummary(_ result: [String: Any]) -> String {
+        let meta = result.dictionary("_meta")
+        let boundary = meta.string("authBoundary", default: "container-managed")
+        let mode = meta.string("requestAuthMode", default: "host-managed-bearer")
+        return "\(boundary), \(mode), tokenVisible=\(meta.string("tokenVisibleToSkill", default: "false"))"
+    }
+}
+
 final class RunningDemoServer {
     let process: Process
     let url: String
@@ -274,6 +491,7 @@ enum DemoPipelineError: LocalizedError {
     case identityDocumentInvalid
     case serverExited(stdout: String, stderr: String)
     case timeout(String)
+    case commandFailed(String)
 
     var errorDescription: String? {
         switch self {
@@ -286,6 +504,8 @@ enum DemoPipelineError: LocalizedError {
         case let .serverExited(stdout, stderr):
             return "localhost coffee service exited before becoming ready. stdout=\(stdout.prefixText(300)) stderr=\(stderr.prefixText(300))"
         case let .timeout(message):
+            return message
+        case let .commandFailed(message):
             return message
         }
     }

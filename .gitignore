@@ -24,6 +24,7 @@ target
 mac-app/**/.build/
 mac-app/**/.swiftpm/
 mac-app/**/*.xcuserdata/
+mac-app/**/xcuserdata/
 mac-app/**/.xcode-derived/
 
 # Python demo server artifacts

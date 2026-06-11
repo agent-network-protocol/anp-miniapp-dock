@@ -14,6 +14,7 @@ final class ChatbotViewModel: ObservableObject {
         )
     ]
     @Published var errorMessage: String?
+    private var coffeeRuntime: CoffeeInteractiveRuntime?
 
     init() {
         repoRootDisplay = RepoLocator.findRepoRoot()?.path(percentEncoded: false) ?? "未找到仓库根目录，可设置 ANP_DOCK_REPO_ROOT"
@@ -34,6 +35,8 @@ final class ChatbotViewModel: ObservableObject {
 
     func reset() {
         guard !isRunning else { return }
+        coffeeRuntime?.stop()
+        coffeeRuntime = nil
         errorMessage = nil
         statusText = "ready"
         messages = [
@@ -52,27 +55,120 @@ final class ChatbotViewModel: ObservableObject {
 
         Task {
             do {
-                let runner = ChatbotTurnRunner()
-                let result = try await runner.run(userText: userText)
+                let result = try await ChatbotTurnRunner().recognize(userText: userText)
                 repoRootDisplay = result.repoRoot.path(percentEncoded: false)
                 messages.append(contentsOf: result.messages)
-                statusText = "ok"
+
+                switch result.intent.intent {
+                case .coffeeOrder:
+                    statusText = "starting coffee service"
+                    coffeeRuntime?.stop()
+                    coffeeRuntime = try await DemoPipelineRunner().startInteractiveSessionAsync()
+                    if let repoRoot = coffeeRuntime?.repoRoot {
+                        repoRootDisplay = repoRoot.path(percentEncoded: false)
+                    }
+
+                    statusText = "loading drinks"
+                    let query = result.intent.arguments["query"] ?? "latte"
+                    let drinkList = try await coffeeRuntime?.searchDrinks(query: query)
+                    guard let drinkList else {
+                        throw DemoPipelineError.commandFailed("interactive coffee runtime was not started")
+                    }
+                    messages.append(ChatMessage(
+                        role: .assistant,
+                        text: "第一步：这是饮品选择卡片。请在卡片里选择一杯咖啡。",
+                        detail: "第一个卡片是 Coffee Skill 返回的 `drink-list` 组件。点击饮品按钮后，宿主会触发组件动作 `api/call confirmOrder`，再调用容器里的小程序 API。",
+                        coffeeCard: .drinkList(drinkList),
+                        logLines: coffeeRuntime?.logLines ?? []
+                    ))
+                    statusText = "waiting for drink"
+                case .unknown:
+                    messages.append(ChatMessage(
+                        role: .assistant,
+                        text: "当前 Demo 只接入了咖啡点单 Skill。你可以试试：我要点一杯咖啡。",
+                        detail: "没有调用小程序容器。"
+                    ))
+                    statusText = "ready"
+                }
             } catch {
-                errorMessage = error.localizedDescription
-                messages.append(ChatMessage(
-                    role: .assistant,
-                    text: "执行失败：\(error.localizedDescription)",
-                    detail: "请检查 Rust workspace、localhost coffee service、以及 OpenAI 环境变量配置。"
-                ))
-                statusText = "failed"
+                appendFailure(error)
             }
             isRunning = false
         }
+    }
+
+    func selectDrink(_ drink: CoffeeDrink) {
+        guard !isRunning else { return }
+        guard let coffeeRuntime else {
+            appendFailure(DemoPipelineError.commandFailed("interactive coffee runtime was not started"))
+            return
+        }
+
+        isRunning = true
+        statusText = "confirming order"
+        messages.append(ChatMessage(role: .user, text: "选择 \(drink.name)"))
+        Task {
+            do {
+                let order = try await coffeeRuntime.confirmOrder(drinkId: drink.id)
+                messages.append(ChatMessage(
+                    role: .assistant,
+                    text: "第二步：这是确认订单卡片。请确认金额并点击支付。",
+                    detail: "第二个卡片是 Coffee Skill 返回的 `order-confirm` 组件。点击支付按钮后，宿主会触发组件动作 `api/call payOrder`，再调用容器完成后续支付 API。",
+                    coffeeCard: .orderConfirm(order),
+                    logLines: coffeeRuntime.logLines
+                ))
+                statusText = "waiting for payment"
+            } catch {
+                appendFailure(error)
+            }
+            isRunning = false
+        }
+    }
+
+    func payOrder(_ order: CoffeeOrderCard) {
+        guard !isRunning else { return }
+        guard let coffeeRuntime else {
+            appendFailure(DemoPipelineError.commandFailed("interactive coffee runtime was not started"))
+            return
+        }
+
+        isRunning = true
+        statusText = "paying"
+        messages.append(ChatMessage(role: .user, text: "支付订单 \(order.orderId)"))
+        Task {
+            do {
+                let payment = try await coffeeRuntime.payOrder(orderId: order.orderId)
+                messages.append(ChatMessage(
+                    role: .assistant,
+                    text: "第三步：支付完成。这是支付结果卡片。",
+                    detail: "第三个卡片是 `payment-result` 组件。真实流程中它还会触发 `expirePreviousCards`，使确认订单卡片过期。",
+                    coffeeCard: .paymentResult(payment),
+                    logLines: coffeeRuntime.logLines
+                ))
+                coffeeRuntime.stop()
+                self.coffeeRuntime = nil
+                statusText = "paid"
+            } catch {
+                appendFailure(error)
+            }
+            isRunning = false
+        }
+    }
+
+    private func appendFailure(_ error: Error) {
+        errorMessage = error.localizedDescription
+        messages.append(ChatMessage(
+            role: .assistant,
+            text: "执行失败：\(error.localizedDescription)",
+            detail: "请检查 Rust workspace、localhost coffee service、以及 OpenAI 环境变量配置。"
+        ))
+        statusText = "failed"
     }
 }
 
 struct ChatbotTurnResult: Sendable {
     let repoRoot: URL
+    let intent: IntentResult
     let messages: [ChatMessage]
 }
 
@@ -103,9 +199,20 @@ struct ChatbotTurnRunner {
                 snapshot: run.snapshot,
                 logLines: run.logLines
             ))
-            return ChatbotTurnResult(repoRoot: run.repoRoot, messages: output)
+            return ChatbotTurnResult(repoRoot: run.repoRoot, intent: intent, messages: output)
         }
-        return ChatbotTurnResult(repoRoot: repoRoot, messages: output)
+        return ChatbotTurnResult(repoRoot: repoRoot, intent: intent, messages: output)
+    }
+
+    func recognize(userText: String) async throws -> ChatbotTurnResult {
+        let repoRoot = RepoLocator.findRepoRoot() ?? URL(fileURLWithPath: "")
+        let intent = try await IntentRecognizer().recognize(userText: userText)
+        let output = [ChatMessage(
+            role: .assistant,
+            text: "意图识别完成：\(intent.intent.displayName)",
+            detail: "来源：\(intent.source.displayName)；置信度：\(Int(intent.confidence * 100))%。\(intent.userFacingSummary)"
+        )]
+        return ChatbotTurnResult(repoRoot: repoRoot, intent: intent, messages: output)
     }
 
     func run(userText: String) async throws -> ChatbotTurnResult {
@@ -131,14 +238,14 @@ struct ChatbotTurnRunner {
                 snapshot: run.snapshot,
                 logLines: run.logLines
             ))
-            return ChatbotTurnResult(repoRoot: run.repoRoot, messages: output)
+            return ChatbotTurnResult(repoRoot: run.repoRoot, intent: intent, messages: output)
         case .unknown:
             output.append(ChatMessage(
                 role: .assistant,
                 text: "当前 Demo 只接入了咖啡点单 Skill。你可以试试：我要点一杯咖啡。",
                 detail: "没有调用小程序容器。"
             ))
-            return ChatbotTurnResult(repoRoot: repoRoot, messages: output)
+            return ChatbotTurnResult(repoRoot: repoRoot, intent: intent, messages: output)
         }
     }
 }
@@ -154,13 +261,15 @@ struct ChatMessage: Identifiable, Sendable {
     let text: String
     let detail: String?
     let snapshot: PipelineSnapshot?
+    let coffeeCard: CoffeeInteractiveCard?
     let logLines: [String]
 
-    init(role: ChatRole, text: String, detail: String? = nil, snapshot: PipelineSnapshot? = nil, logLines: [String] = []) {
+    init(role: ChatRole, text: String, detail: String? = nil, snapshot: PipelineSnapshot? = nil, coffeeCard: CoffeeInteractiveCard? = nil, logLines: [String] = []) {
         self.role = role
         self.text = text
         self.detail = detail
         self.snapshot = snapshot
+        self.coffeeCard = coffeeCard
         self.logLines = logLines
     }
 }

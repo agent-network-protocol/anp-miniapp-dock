@@ -77,7 +77,12 @@ struct ContentView: View {
             ScrollView {
                 LazyVStack(spacing: 16) {
                     ForEach(viewModel.messages) { message in
-                        ChatMessageBubble(message: message)
+                        ChatMessageBubble(
+                            message: message,
+                            isRunning: viewModel.isRunning,
+                            onSelectDrink: { drink in viewModel.selectDrink(drink) },
+                            onPayOrder: { order in viewModel.payOrder(order) }
+                        )
                             .id(message.id)
                     }
                     if viewModel.isRunning {
@@ -148,6 +153,9 @@ struct ContentView: View {
 
 private struct ChatMessageBubble: View {
     let message: ChatMessage
+    let isRunning: Bool
+    let onSelectDrink: (CoffeeDrink) -> Void
+    let onPayOrder: (CoffeeOrderCard) -> Void
 
     var body: some View {
         HStack(alignment: .top) {
@@ -181,6 +189,14 @@ private struct ChatMessageBubble: View {
                     if let snapshot = message.snapshot {
                         SnapshotAttachmentView(snapshot: snapshot, logLines: message.logLines)
                     }
+                    if let coffeeCard = message.coffeeCard {
+                        CoffeeInteractiveCardView(
+                            card: coffeeCard,
+                            isRunning: isRunning,
+                            onSelectDrink: onSelectDrink,
+                            onPayOrder: onPayOrder
+                        )
+                    }
                 }
                 .padding(14)
                 .frame(maxWidth: message.role == .user ? 520 : 860, alignment: .leading)
@@ -201,6 +217,193 @@ private struct ChatMessageBubble: View {
 
     private var borderColor: Color {
         message.role == .user ? Color.accentColor.opacity(0.24) : Color.secondary.opacity(0.12)
+    }
+}
+
+private struct CoffeeInteractiveCardView: View {
+    let card: CoffeeInteractiveCard
+    let isRunning: Bool
+    let onSelectDrink: (CoffeeDrink) -> Void
+    let onPayOrder: (CoffeeOrderCard) -> Void
+
+    var body: some View {
+        switch card {
+        case let .drinkList(model):
+            DrinkListInteractiveCard(model: model, isRunning: isRunning, onSelectDrink: onSelectDrink)
+        case let .orderConfirm(model):
+            OrderConfirmInteractiveCard(model: model, isRunning: isRunning, onPayOrder: onPayOrder)
+        case let .paymentResult(model):
+            PaymentResultInteractiveCard(model: model)
+        }
+    }
+}
+
+private struct DrinkListInteractiveCard: View {
+    let model: CoffeeDrinkListCard
+    let isRunning: Bool
+    let onSelectDrink: (CoffeeDrink) -> Void
+
+    var body: some View {
+        CardContainer {
+            VStack(alignment: .leading, spacing: 14) {
+                CardHeader(
+                    icon: "cup.and.saucer.fill",
+                    tint: .brown,
+                    title: "选择咖啡",
+                    subtitle: "MiniApp component: \(model.componentPath)"
+                )
+                Text(model.contentText)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+
+                VStack(spacing: 10) {
+                    ForEach(model.drinks) { drink in
+                        HStack(spacing: 12) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(drink.name)
+                                    .font(.headline)
+                                Text("drinkId=\(drink.id)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text("¥\(drink.price)")
+                                .font(.headline)
+                            Button {
+                                onSelectDrink(drink)
+                            } label: {
+                                Label("选择", systemImage: "hand.tap.fill")
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(isRunning)
+                        }
+                        .padding(12)
+                        .background(.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
+                }
+
+                FlowHint(text: "点击饮品 = 触发组件 confirmDrink 事件 → api/call confirmOrder")
+                AuthBoundaryLabel(text: model.authSummary)
+            }
+        }
+    }
+}
+
+private struct OrderConfirmInteractiveCard: View {
+    let model: CoffeeOrderCard
+    let isRunning: Bool
+    let onPayOrder: (CoffeeOrderCard) -> Void
+
+    var body: some View {
+        CardContainer {
+            VStack(alignment: .leading, spacing: 14) {
+                CardHeader(
+                    icon: "checklist.checked",
+                    tint: .orange,
+                    title: "确认订单",
+                    subtitle: "MiniApp component: \(model.componentPath)"
+                )
+                Text(model.contentText)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+
+                VStack(alignment: .leading, spacing: 8) {
+                    EvidenceRow(label: "订单", value: model.orderId)
+                    EvidenceRow(label: "饮品", value: model.drinkId)
+                    EvidenceRow(label: "应付", value: "¥\(model.payable)")
+                }
+
+                Button {
+                    onPayOrder(model)
+                } label: {
+                    Label("支付 ¥\(model.payable)", systemImage: "creditcard.fill")
+                        .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(isRunning)
+
+                FlowHint(text: "点击支付 = 触发组件 payOrder 事件 → api/call payOrder")
+                AuthBoundaryLabel(text: model.authSummary)
+            }
+        }
+    }
+}
+
+private struct PaymentResultInteractiveCard: View {
+    let model: CoffeePaymentCard
+
+    var body: some View {
+        CardContainer {
+            VStack(alignment: .leading, spacing: 14) {
+                CardHeader(
+                    icon: "checkmark.circle.fill",
+                    tint: .green,
+                    title: "支付结果",
+                    subtitle: "MiniApp component: \(model.componentPath)"
+                )
+                Text(model.contentText)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                VStack(alignment: .leading, spacing: 8) {
+                    EvidenceRow(label: "订单", value: model.orderId)
+                    EvidenceRow(label: "状态", value: model.status)
+                }
+                FlowHint(text: "支付完成后，容器会触发 expirePreviousCards，使上一张确认订单卡片过期。")
+                AuthBoundaryLabel(text: model.authSummary)
+            }
+        }
+    }
+}
+
+private struct CardHeader: View {
+    let icon: String
+    let tint: Color
+    let title: String
+    let subtitle: String
+
+    var body: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(tint.opacity(0.16))
+                    .frame(width: 48, height: 48)
+                Image(systemName: icon)
+                    .foregroundStyle(tint)
+                    .font(.title3)
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                Text(title)
+                    .font(.title3.bold())
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
+            Spacer()
+        }
+    }
+}
+
+private struct FlowHint: View {
+    let text: String
+
+    var body: some View {
+        Label(text, systemImage: "arrow.triangle.branch")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+    }
+}
+
+private struct AuthBoundaryLabel: View {
+    let text: String
+
+    var body: some View {
+        Label(text, systemImage: "lock.shield")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(2)
     }
 }
 
