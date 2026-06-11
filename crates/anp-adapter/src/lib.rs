@@ -5,7 +5,14 @@ pub mod did;
 pub mod signed_request;
 pub mod token;
 
-pub use challenge::{ChallengeLoginRequest, ChallengeLoginResponse, DidChallenge};
+pub use challenge::{
+    sign_challenge_proof, verify_challenge_proof, verify_challenge_proof_at,
+    verify_challenge_proof_at_with_resolver, verify_challenge_proof_with_resolver,
+    ChallengeLoginRequest, ChallengeLoginResponse, ChallengeProofError, ChallengeProofKind,
+    ChallengeProofPayload, DidChallenge, DidDocumentResolver, DockDidChallengeProof,
+    StaticDidDocumentResolver, VerifiedChallengeProof, CHALLENGE_PROOF_METHOD,
+    CHALLENGE_PROOF_TYPE,
+};
 pub use did::{
     DidCredential, DidCredentialConfig, DidCredentialError, DidCredentialProvider,
     FileDidCredentialProvider, IdentitySession,
