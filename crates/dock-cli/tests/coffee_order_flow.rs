@@ -121,6 +121,11 @@ async fn dock_cli_runs_coffee_order_flow_end_to_end() {
     assert_eq!(demo["status"], "ok");
     assert_eq!(demo["server"]["auth"]["tokenReceived"], true);
     assert_eq!(demo["server"]["auth"]["capabilityToken"], "[REDACTED]");
+    assert_eq!(
+        demo["audit"][0]["userDid"],
+        fixture.did(),
+        "local runtime audit scope should match the signed DID credential"
+    );
     assert_eq!(demo["server"]["business"]["firstDrinkId"], "latte");
     assert_eq!(demo["server"]["business"]["paymentStatus"], "paid");
     assert_eq!(demo["flow"][0]["name"], "searchDrinks");
@@ -137,6 +142,11 @@ async fn dock_cli_runs_coffee_order_flow_end_to_end() {
     let rendered = demo.to_string();
     assert!(!rendered.contains("demo-token"));
     assert!(!rendered.contains("capability_"));
+    assert!(!rendered.contains("Authorization"));
+    assert!(!rendered.contains("Signature"));
+    assert!(!rendered.contains("Signature-Input"));
+    assert!(!rendered.contains(fixture.key_path.to_string_lossy().as_ref()));
+    assert!(!rendered.contains(&fixture.key_material));
 }
 
 #[test]
@@ -171,6 +181,7 @@ struct DidFixture {
     did_document: Value,
     did_path: PathBuf,
     key_path: PathBuf,
+    key_material: String,
 }
 
 impl DidFixture {
@@ -180,14 +191,16 @@ impl DidFixture {
         let dir = TempDir::new("dock-cli-coffee-flow").expect("temp dir creates");
         let did_path = dir.path().join("did.json");
         let key_path = dir.path().join("key.pem");
+        let key_material = bundle.keys["key-1"].private_key_pem.clone();
         std::fs::write(&did_path, serde_json::to_vec(&bundle.did_document).unwrap()).unwrap();
-        std::fs::write(&key_path, &bundle.keys["key-1"].private_key_pem).unwrap();
+        std::fs::write(&key_path, &key_material).unwrap();
         set_private_key_permissions(&key_path);
         Self {
             _dir: dir,
             did_document: bundle.did_document,
             did_path,
             key_path,
+            key_material,
         }
     }
 

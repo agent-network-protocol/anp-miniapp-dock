@@ -423,7 +423,7 @@ fn validate(skill_path: &Path) -> Result<Value, CliError> {
 
 fn call_api(skill_path: &Path, api_name: &str, json_args: &str) -> Result<Value, CliError> {
     let args = parse_json(json_args, "jsonArgs")?;
-    let runtime = RuntimeHarness::load(skill_path)?;
+    let runtime = RuntimeHarness::load(skill_path, RuntimeIdentity::default_demo())?;
     let outcome = runtime.call(api_name, args)?;
     Ok(json!({
         "status": "ok",
@@ -484,7 +484,14 @@ fn run_demo(
     let auth = DemoHttpClient::new(server).login(auth_config)?;
     let server_business =
         DemoHttpClient::new(server).coffee_business_check(&auth.capability_token)?;
-    let runtime = RuntimeHarness::load(skill_path)?;
+    let runtime = RuntimeHarness::load(
+        skill_path,
+        RuntimeIdentity {
+            user_did: auth_config.user_did.clone(),
+            agent_did: auth_config.agent_did.clone(),
+            merchant_did: auth.merchant_did.clone(),
+        },
+    )?;
 
     let search = runtime.call("searchDrinks", json!({"query": "latte"}))?;
     let mut drink_component = mount_for_outcome(
@@ -566,10 +573,28 @@ struct RuntimeHarness {
         CollectAudit,
     >,
     audit: CollectAudit,
+    identity: RuntimeIdentity,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct RuntimeIdentity {
+    user_did: String,
+    agent_did: Option<String>,
+    merchant_did: String,
+}
+
+impl RuntimeIdentity {
+    fn default_demo() -> Self {
+        Self {
+            user_did: DEFAULT_USER_DID.to_owned(),
+            agent_did: Some(DEFAULT_AGENT_DID.to_owned()),
+            merchant_did: DEFAULT_MERCHANT_DID.to_owned(),
+        }
+    }
 }
 
 impl RuntimeHarness {
-    fn load(skill_path: &Path) -> Result<Self, CliError> {
+    fn load(skill_path: &Path, identity: RuntimeIdentity) -> Result<Self, CliError> {
         let skill = load_skill(skill_path)?;
         let api_vm = ApiVm::load_skill(skill.clone())?;
         let audit = CollectAudit::default();
@@ -586,6 +611,7 @@ impl RuntimeHarness {
         Ok(Self {
             orchestrator,
             audit,
+            identity,
         })
     }
 
@@ -596,9 +622,9 @@ impl RuntimeHarness {
     ) -> Result<dock_core::CallOutcome, CliError> {
         self.orchestrator
             .call_api(ApiCallContext {
-                user_did: Some(DEFAULT_USER_DID.to_owned()),
-                agent_did: Some(DEFAULT_AGENT_DID.to_owned()),
-                merchant_did: Some(DEFAULT_MERCHANT_DID.to_owned()),
+                user_did: Some(self.identity.user_did.clone()),
+                agent_did: self.identity.agent_did.clone(),
+                merchant_did: Some(self.identity.merchant_did.clone()),
                 skill_id: DEFAULT_SKILL_ID.to_owned(),
                 session_id: DEFAULT_SESSION_ID.to_owned(),
                 api_name: api_name.into(),
