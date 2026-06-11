@@ -402,6 +402,8 @@ run-demo
 
 ## 12. 分阶段落地
 
+从 Demo 原型演进到线上稳定容器的完整开发路线图见 [产品化迭代总体计划](../plan/production-readiness-roadmap.md)。本节保留 P0/P1/P2 架构分层摘要。
+
 P0：第一个 MVP
 
 - 完整支持原子接口契约与执行主线：`Skill Loader`、`mcp.json.apis[]`、`inputSchema` 校验、`index.js / apis/*.js`、`createSkill`、`registerAPI`、`use middleware`、`AtomicApiResult`、错误处理、超时控制和日志捕获；`wx.request`、storage、session/card API 和 ANP DID HTTP 已作为 host/adapter 边界实现，后续可继续注入 JS runtime；

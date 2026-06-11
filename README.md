@@ -13,6 +13,7 @@ The MVP is now implemented as a Cargo workspace. It can load a MiniApp MCP-style
 - [MiniApp MCP protocol notes](docs/weichat-miniapp-mcp-protocol/weichat-miniapp-mcp.txt)
 - [Local demo runbook](docs/runbook/local-demo.md)
 - [Security runbook](docs/runbook/security.md)
+- [Production readiness roadmap](docs/plan/production-readiness-roadmap.md)
 
 ## Workspace Layout
 
