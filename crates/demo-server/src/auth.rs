@@ -2,10 +2,99 @@ use crate::audit::now_ms;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
+use std::fmt;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
 const TOKEN_TTL_MS: u64 = 15 * 60 * 1000;
 const CHALLENGE_TTL_MS: u64 = 5 * 60 * 1000;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServerAuthConfig {
+    pub merchant_did: String,
+    pub challenge_ttl_ms: u64,
+    pub token_ttl_ms: u64,
+    pub token_issuer: Option<TokenIssuerConfig>,
+    pub trusted_did_documents: BTreeMap<String, PathBuf>,
+}
+
+impl ServerAuthConfig {
+    pub fn new(merchant_did: impl Into<String>) -> Self {
+        Self {
+            merchant_did: merchant_did.into(),
+            challenge_ttl_ms: CHALLENGE_TTL_MS,
+            token_ttl_ms: TOKEN_TTL_MS,
+            token_issuer: None,
+            trusted_did_documents: BTreeMap::new(),
+        }
+    }
+
+    pub fn with_token_issuer(mut self, token_issuer: TokenIssuerConfig) -> Self {
+        self.token_issuer = Some(token_issuer);
+        self
+    }
+
+    pub fn with_trusted_did_document(
+        mut self,
+        did: impl Into<String>,
+        path: impl Into<PathBuf>,
+    ) -> Self {
+        self.trusted_did_documents.insert(did.into(), path.into());
+        self
+    }
+
+    pub fn for_tests() -> Self {
+        Self::new("did:wba:coffee-merchant.example").with_token_issuer(
+            TokenIssuerConfig::test_only("test-only-token-issuer-secret"),
+        )
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct TokenIssuerConfig {
+    pub algorithm: String,
+    secret: String,
+}
+
+impl TokenIssuerConfig {
+    pub fn new_hs256(secret: impl Into<String>) -> Result<Self, AuthConfigError> {
+        let secret = secret.into();
+        if secret.trim().is_empty() {
+            return Err(AuthConfigError::MissingTokenIssuer);
+        }
+        Ok(Self {
+            algorithm: "HS256".to_owned(),
+            secret,
+        })
+    }
+
+    pub fn redacted_summary(&self) -> BTreeMap<&'static str, &'static str> {
+        BTreeMap::from([("algorithm", "HS256"), ("secret", "[REDACTED]")])
+    }
+
+    fn test_only(secret: impl Into<String>) -> Self {
+        Self {
+            algorithm: "HS256".to_owned(),
+            secret: secret.into(),
+        }
+    }
+}
+
+impl fmt::Debug for TokenIssuerConfig {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("TokenIssuerConfig")
+            .field("algorithm", &self.algorithm)
+            .field("secret", &"[REDACTED]")
+            .finish()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AuthConfigError {
+    MissingTokenIssuer,
+    InvalidTrustedDidDocument,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -228,5 +317,22 @@ mod tests {
             .expect("login succeeds");
 
         assert!(response.capability_token.starts_with("demo-cap-"));
+    }
+
+    #[test]
+    fn server_auth_config_has_no_silent_token_issuer() {
+        let config = ServerAuthConfig::new("did:wba:merchant.example");
+
+        assert_eq!(config.merchant_did, "did:wba:merchant.example");
+        assert!(config.token_issuer.is_none());
+        assert!(config.trusted_did_documents.is_empty());
+    }
+
+    #[test]
+    fn token_issuer_summary_redacts_secret() {
+        let issuer = TokenIssuerConfig::new_hs256("real-secret").expect("issuer config");
+
+        assert_eq!(issuer.redacted_summary().get("secret"), Some(&"[REDACTED]"));
+        assert!(!format!("{:?}", issuer.redacted_summary()).contains("real-secret"));
     }
 }

@@ -1,5 +1,7 @@
 use crate::audit::{AuditLog, AuditRecord};
-use crate::auth::{AuthError, AuthStore, ChallengeLoginRequest, ChallengeRequest, TokenRecord};
+use crate::auth::{
+    AuthError, AuthStore, ChallengeLoginRequest, ChallengeRequest, ServerAuthConfig, TokenRecord,
+};
 use crate::coffee::{CoffeeError, CoffeeStore, ConfirmOrderRequest, PayOrderRequest};
 use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderMap, StatusCode};
@@ -24,7 +26,7 @@ pub struct DemoState {
 #[derive(Debug)]
 struct DemoStateInner {
     skill_root: PathBuf,
-    merchant_did: String,
+    auth_config: ServerAuthConfig,
     auth: AuthStore,
     coffee: CoffeeStore,
     audit: AuditLog,
@@ -32,10 +34,14 @@ struct DemoStateInner {
 
 impl DemoState {
     pub fn new(skill_root: impl Into<PathBuf>) -> Self {
+        Self::with_auth_config(skill_root, ServerAuthConfig::new(DEFAULT_MERCHANT_DID))
+    }
+
+    pub fn with_auth_config(skill_root: impl Into<PathBuf>, auth_config: ServerAuthConfig) -> Self {
         Self {
             inner: Arc::new(DemoStateInner {
                 skill_root: skill_root.into(),
-                merchant_did: DEFAULT_MERCHANT_DID.to_owned(),
+                auth_config,
                 auth: AuthStore::default(),
                 coffee: CoffeeStore::default(),
                 audit: AuditLog::default(),
@@ -44,7 +50,11 @@ impl DemoState {
     }
 
     pub fn merchant_did(&self) -> &str {
-        &self.inner.merchant_did
+        &self.inner.auth_config.merchant_did
+    }
+
+    pub fn auth_config(&self) -> &ServerAuthConfig {
+        &self.inner.auth_config
     }
 
     pub fn insert_token_for_test(&self, record: TokenRecord) {
@@ -88,7 +98,7 @@ async fn registry_agents(State(state): State<DemoState>) -> Json<Value> {
         "agents": [{
             "id": AGENT_ID,
             "name": "Coffee Merchant Agent",
-            "did": state.inner.merchant_did,
+            "did": state.inner.auth_config.merchant_did,
             "manifestUrl": "/agents/coffee/manifest",
             "skillUrl": "/agents/coffee/mcp.json"
         }]
@@ -99,7 +109,7 @@ async fn agent_manifest(State(state): State<DemoState>) -> Json<Value> {
     Json(json!({
         "id": AGENT_ID,
         "name": "Coffee Merchant Agent",
-        "did": state.inner.merchant_did,
+        "did": state.inner.auth_config.merchant_did,
         "skill": {
             "skillMd": "/agents/coffee/SKILL.md",
             "mcpJson": "/agents/coffee/mcp.json",
@@ -149,7 +159,7 @@ async fn auth_challenge(
     let challenge = state
         .inner
         .auth
-        .challenge(&state.inner.merchant_did, request.clone());
+        .challenge(&state.inner.auth_config.merchant_did, request.clone());
     state
         .inner
         .audit
@@ -170,7 +180,11 @@ async fn auth_login(
         Some(request.skill_id.clone()),
         Some(request.user_did.clone()),
     );
-    match state.inner.auth.login(&state.inner.merchant_did, request) {
+    match state
+        .inner
+        .auth
+        .login(&state.inner.auth_config.merchant_did, request)
+    {
         Ok(response) => {
             state
                 .inner

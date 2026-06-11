@@ -7,8 +7,8 @@ pub mod token;
 
 pub use challenge::{ChallengeLoginRequest, ChallengeLoginResponse, DidChallenge};
 pub use did::{
-    DidCredential, DidCredentialError, DidCredentialProvider, FileDidCredentialProvider,
-    IdentitySession,
+    DidCredential, DidCredentialConfig, DidCredentialError, DidCredentialProvider,
+    FileDidCredentialProvider, IdentitySession,
 };
 pub use signed_request::{
     redact_for_log, AnpHttpClient, AnpRequestBroker, AnpRequestError, AuthMaterial, HttpTransport,

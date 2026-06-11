@@ -1,4 +1,7 @@
-use anp_adapter::{ChallengeLoginRequest, ChallengeLoginResponse, DidChallenge};
+use anp_adapter::{
+    ChallengeLoginRequest, ChallengeLoginResponse, DidChallenge, DidCredentialConfig,
+    DidCredentialError,
+};
 use card_spec::{fallback_from_result, FallbackReason};
 use clap::{Parser, Subcommand};
 use component_runtime::{
@@ -17,6 +20,7 @@ use serde::Serialize;
 use serde_json::{json, Map, Value};
 use skill_loader::{load_skill, resolve_component_path, LoadedSkill};
 use std::cell::RefCell;
+use std::fmt;
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
@@ -59,6 +63,18 @@ enum Command {
         skill: PathBuf,
         #[arg(long)]
         server: String,
+        #[arg(long)]
+        did_document: Option<PathBuf>,
+        #[arg(long)]
+        private_key: Option<PathBuf>,
+        #[arg(long)]
+        user_did: Option<String>,
+        #[arg(long)]
+        agent_did: Option<String>,
+        #[arg(long)]
+        identity_handle: Option<String>,
+        #[arg(long)]
+        identity_root: Option<PathBuf>,
     },
 }
 
@@ -95,7 +111,27 @@ impl Cli {
                 json_input,
             } => preview_component(skill, component_path, json_input),
             Command::PreviewCard { result_json } => preview_card(result_json),
-            Command::RunDemo { skill, server } => run_demo(skill, server),
+            Command::RunDemo {
+                skill,
+                server,
+                did_document,
+                private_key,
+                user_did,
+                agent_did,
+                identity_handle,
+                identity_root,
+            } => {
+                let auth_config = DemoAuthConfig::from_inputs_optional(
+                    did_document.clone(),
+                    private_key.clone(),
+                    user_did.clone(),
+                    agent_did.clone(),
+                    identity_handle.clone(),
+                    identity_root.clone(),
+                    EnvConfigSource,
+                )?;
+                run_demo(skill, server, auth_config.as_ref())
+            }
         }
     }
 }
@@ -134,6 +170,238 @@ pub enum CliError {
 
     #[error("demo flow failed: {0}")]
     Demo(String),
+
+    #[error("DID credential configuration failed: {0}")]
+    Credential(#[from] DidCredentialError),
+}
+
+#[derive(Clone, PartialEq, Eq)]
+struct DemoAuthConfig {
+    user_did: String,
+    agent_did: Option<String>,
+    credential: DidCredentialConfig,
+}
+
+impl fmt::Debug for DemoAuthConfig {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("DemoAuthConfig")
+            .field("user_did", &self.user_did)
+            .field("agent_did", &self.agent_did)
+            .field("credential", &"[REDACTED]")
+            .finish()
+    }
+}
+
+impl DemoAuthConfig {
+    fn from_inputs_optional(
+        did_document: Option<PathBuf>,
+        private_key: Option<PathBuf>,
+        user_did: Option<String>,
+        agent_did: Option<String>,
+        identity_handle: Option<String>,
+        identity_root: Option<PathBuf>,
+        env: impl ConfigSource,
+    ) -> Result<Option<Self>, DidCredentialError> {
+        let has_explicit_input = did_document.is_some()
+            || private_key.is_some()
+            || user_did.is_some()
+            || agent_did.is_some()
+            || identity_handle.is_some()
+            || identity_root.is_some();
+        let has_env_input = env.has_any(&[
+            "ANP_DOCK_DID_DOCUMENT",
+            "ANP_DOCK_PRIVATE_KEY",
+            "ANP_DOCK_USER_DID",
+            "ANP_DOCK_AGENT_DID",
+            "ANP_DOCK_IDENTITY_HANDLE",
+            "ANP_DOCK_IDENTITY_ROOT",
+        ]);
+        if !has_explicit_input && !has_env_input {
+            return Ok(None);
+        }
+        Self::from_inputs(
+            did_document,
+            private_key,
+            user_did,
+            agent_did,
+            identity_handle,
+            identity_root,
+            env,
+        )
+        .map(Some)
+    }
+
+    fn from_inputs(
+        did_document: Option<PathBuf>,
+        private_key: Option<PathBuf>,
+        user_did: Option<String>,
+        agent_did: Option<String>,
+        identity_handle: Option<String>,
+        identity_root: Option<PathBuf>,
+        env: impl ConfigSource,
+    ) -> Result<Self, DidCredentialError> {
+        let did_document = did_document.or_else(|| env.path("ANP_DOCK_DID_DOCUMENT"));
+        let private_key = private_key.or_else(|| env.path("ANP_DOCK_PRIVATE_KEY"));
+        let user_did = user_did.or_else(|| env.string("ANP_DOCK_USER_DID"));
+        let agent_did = agent_did.or_else(|| env.string("ANP_DOCK_AGENT_DID"));
+        let identity_handle = identity_handle.or_else(|| env.string("ANP_DOCK_IDENTITY_HANDLE"));
+        let identity_root = identity_root.or_else(|| env.path("ANP_DOCK_IDENTITY_ROOT"));
+
+        if did_document.is_some() || private_key.is_some() || user_did.is_some() {
+            if did_document.is_none() || private_key.is_none() || user_did.is_none() {
+                return Err(DidCredentialError::InvalidIdentity);
+            }
+            if identity_handle.is_some() || identity_root.is_some() {
+                return Err(DidCredentialError::InvalidIdentity);
+            }
+            let credential = DidCredentialConfig::new(
+                did_document.expect("checked did document"),
+                private_key.expect("checked private key"),
+            );
+            credential.validate()?;
+            return Ok(Self {
+                user_did: user_did.expect("checked user DID"),
+                agent_did,
+                credential,
+            });
+        }
+
+        let handle = identity_handle.ok_or(DidCredentialError::Unavailable)?;
+        let root = identity_root.ok_or(DidCredentialError::Unavailable)?;
+        let resolved = resolve_identity_from_store(&root, &handle)?;
+        resolved.credential.validate()?;
+        Ok(Self {
+            agent_did,
+            ..resolved
+        })
+    }
+
+    fn redacted_summary(&self) -> Value {
+        json!({
+            "userDid": self.user_did,
+            "agentDid": self.agent_did,
+            "credential": {
+                "didDocument": "[CONFIGURED]",
+                "privateKey": "[REDACTED]"
+            }
+        })
+    }
+}
+
+trait ConfigSource: Copy {
+    fn string(self, name: &str) -> Option<String>;
+
+    fn has_any(self, names: &[&str]) -> bool {
+        names.iter().any(|name| self.string(name).is_some())
+    }
+
+    fn path(self, name: &str) -> Option<PathBuf> {
+        self.string(name)
+            .filter(|value| !value.trim().is_empty())
+            .map(PathBuf::from)
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct EnvConfigSource;
+
+impl ConfigSource for EnvConfigSource {
+    fn string(self, name: &str) -> Option<String> {
+        std::env::var(name)
+            .ok()
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty())
+    }
+}
+
+fn resolve_identity_from_store(
+    root: &Path,
+    handle: &str,
+) -> Result<DemoAuthConfig, DidCredentialError> {
+    let root = identity_store_dir(root);
+    let identity_dir = identity_dir_for_handle(&root, handle)?;
+    let identity = read_json(identity_dir.join("identity.json"))?;
+    let user_did = identity
+        .get("did")
+        .or_else(|| identity.get("userDid"))
+        .and_then(Value::as_str)
+        .ok_or(DidCredentialError::InvalidIdentity)?
+        .to_owned();
+    Ok(DemoAuthConfig {
+        user_did,
+        agent_did: None,
+        credential: DidCredentialConfig::new(
+            identity_dir.join("did_document.json"),
+            identity_dir.join("key-1-private.pem"),
+        ),
+    })
+}
+
+fn identity_store_dir(root: &Path) -> PathBuf {
+    if root.join("index.json").exists() || root.file_name().is_some_and(|name| name == "identities")
+    {
+        return root.to_path_buf();
+    }
+    root.join("identities")
+}
+
+fn identity_dir_for_handle(root: &Path, handle: &str) -> Result<PathBuf, DidCredentialError> {
+    if let Some(path) = identity_dir_from_index(root, handle)? {
+        return Ok(path);
+    }
+    let entries = std::fs::read_dir(root).map_err(|_| DidCredentialError::Unavailable)?;
+    let mut matches = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|_| DidCredentialError::Unavailable)?;
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let Ok(identity) = read_json(path.join("identity.json")) else {
+            continue;
+        };
+        let matches_handle = identity
+            .get("handle")
+            .or_else(|| identity.get("name"))
+            .and_then(Value::as_str)
+            == Some(handle);
+        if matches_handle {
+            matches.push(path);
+        }
+    }
+    match matches.len() {
+        1 => Ok(matches.remove(0)),
+        _ => Err(DidCredentialError::InvalidIdentity),
+    }
+}
+
+fn identity_dir_from_index(
+    root: &Path,
+    handle: &str,
+) -> Result<Option<PathBuf>, DidCredentialError> {
+    let index_path = root.join("index.json");
+    if !index_path.exists() {
+        return Ok(None);
+    }
+    let index = read_json(index_path)?;
+    let entry = index
+        .get(handle)
+        .or_else(|| index.get("handles").and_then(|handles| handles.get(handle)));
+    let Some(entry) = entry else {
+        return Ok(None);
+    };
+    let relative = entry
+        .as_str()
+        .or_else(|| entry.get("dir").and_then(Value::as_str))
+        .or_else(|| entry.get("path").and_then(Value::as_str))
+        .ok_or(DidCredentialError::InvalidIdentity)?;
+    Ok(Some(root.join(relative)))
+}
+
+fn read_json(path: PathBuf) -> Result<Value, DidCredentialError> {
+    let content = std::fs::read_to_string(&path).map_err(|_| DidCredentialError::Unavailable)?;
+    serde_json::from_str(&content).map_err(|_| DidCredentialError::InvalidIdentity)
 }
 
 fn validate(skill_path: &Path) -> Result<Value, CliError> {
@@ -202,7 +470,11 @@ fn preview_card(result_json: &str) -> Result<Value, CliError> {
     }))
 }
 
-fn run_demo(skill_path: &Path, server: &str) -> Result<Value, CliError> {
+fn run_demo(
+    skill_path: &Path,
+    server: &str,
+    auth_config: Option<&DemoAuthConfig>,
+) -> Result<Value, CliError> {
     let auth = DemoHttpClient::new(server).login()?;
     let server_business =
         DemoHttpClient::new(server).coffee_business_check(&auth.capability_token)?;
@@ -255,7 +527,8 @@ fn run_demo(skill_path: &Path, server: &str) -> Result<Value, CliError> {
             "auth": {
                 "merchantDid": auth.merchant_did,
                 "capabilityToken": "[REDACTED]",
-                "tokenReceived": auth.token_received
+                "tokenReceived": auth.token_received,
+                "credential": auth_config.map(DemoAuthConfig::redacted_summary)
             },
             "business": server_business
         },
@@ -950,6 +1223,7 @@ fn redact_text(value: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
     #[test]
     fn parses_validate_args() {
@@ -989,5 +1263,201 @@ mod tests {
 
         assert_eq!(event.kind, component_runtime::ComponentEventKind::Tap);
         assert_eq!(event.dataset["id"], "latte");
+    }
+
+    #[test]
+    fn parses_run_demo_explicit_credential_config() {
+        let fixture = CredentialFixture::new();
+        let cli = Cli::try_parse_from_args([
+            "dock-cli".to_owned(),
+            "run-demo".to_owned(),
+            "--skill".to_owned(),
+            "examples/coffee-skill".to_owned(),
+            "--server".to_owned(),
+            "http://127.0.0.1:3000".to_owned(),
+            "--did-document".to_owned(),
+            fixture.did_path.display().to_string(),
+            "--private-key".to_owned(),
+            fixture.key_path.display().to_string(),
+            "--user-did".to_owned(),
+            "did:wba:user.example".to_owned(),
+        ])
+        .expect("CLI args parse");
+
+        let Command::RunDemo {
+            did_document,
+            private_key,
+            user_did,
+            ..
+        } = cli.command
+        else {
+            panic!("expected run-demo");
+        };
+        let config = DemoAuthConfig::from_inputs(
+            did_document,
+            private_key,
+            user_did,
+            None,
+            None,
+            None,
+            EmptyConfigSource,
+        )
+        .expect("credential config parses");
+
+        assert_eq!(config.user_did, "did:wba:user.example");
+        assert_eq!(config.credential.did_document_path, fixture.did_path);
+    }
+
+    #[test]
+    fn incomplete_run_demo_credential_config_fails_closed() {
+        let fixture = CredentialFixture::new();
+
+        let error = DemoAuthConfig::from_inputs(
+            Some(fixture.did_path),
+            None,
+            Some("did:wba:user.example".to_owned()),
+            None,
+            None,
+            None,
+            EmptyConfigSource,
+        )
+        .expect_err("missing private key must fail");
+
+        assert_eq!(error, DidCredentialError::InvalidIdentity);
+    }
+
+    #[test]
+    fn resolves_identity_handle_from_store_without_exposing_key_content() {
+        let fixture = IdentityStoreFixture::new("miniapp-test.awiki.ai");
+        let config = DemoAuthConfig::from_inputs(
+            None,
+            None,
+            None,
+            None,
+            Some("miniapp-test.awiki.ai".to_owned()),
+            Some(fixture.root.clone()),
+            EmptyConfigSource,
+        )
+        .expect("identity handle resolves");
+
+        assert_eq!(config.user_did, "did:wba:miniapp-test.example");
+        assert_eq!(config.credential.private_key_path, fixture.key_path);
+        let summary = config.redacted_summary().to_string();
+        assert!(!summary.contains("test-only-key"));
+        assert!(!summary.contains("key-1-private.pem"));
+        assert!(summary.contains("[REDACTED]"));
+    }
+
+    #[derive(Clone, Copy)]
+    struct EmptyConfigSource;
+
+    impl ConfigSource for EmptyConfigSource {
+        fn string(self, _name: &str) -> Option<String> {
+            None
+        }
+    }
+
+    struct CredentialFixture {
+        _dir: TempDir,
+        did_path: PathBuf,
+        key_path: PathBuf,
+    }
+
+    impl CredentialFixture {
+        fn new() -> Self {
+            let dir = TempDir::new("dock-cli-credential").expect("temp dir");
+            let did_path = dir.path().join("did_document.json");
+            let key_path = dir.path().join("key-1-private.pem");
+            fs::write(&did_path, br#"{"id":"did:wba:user.example"}"#).expect("write DID");
+            fs::write(&key_path, "test-only-key").expect("write key");
+            set_private_key_permissions(&key_path);
+            Self {
+                _dir: dir,
+                did_path,
+                key_path,
+            }
+        }
+    }
+
+    struct IdentityStoreFixture {
+        _dir: TempDir,
+        root: PathBuf,
+        key_path: PathBuf,
+    }
+
+    impl IdentityStoreFixture {
+        fn new(handle: &str) -> Self {
+            let dir = TempDir::new("dock-cli-identity-store").expect("temp dir");
+            let identities = dir.path().join("identities");
+            let identity_dir = identities.join("e1_test");
+            fs::create_dir_all(&identity_dir).expect("create identity dir");
+            fs::write(
+                identity_dir.join("identity.json"),
+                format!(r#"{{"handle":"{handle}","did":"did:wba:miniapp-test.example"}}"#),
+            )
+            .expect("write identity");
+            fs::write(
+                identity_dir.join("did_document.json"),
+                br#"{"id":"did:wba:miniapp-test.example"}"#,
+            )
+            .expect("write DID document");
+            let key_path = identity_dir.join("key-1-private.pem");
+            fs::write(&key_path, "test-only-key").expect("write key");
+            set_private_key_permissions(&key_path);
+            Self {
+                root: dir.path().to_path_buf(),
+                key_path,
+                _dir: dir,
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    fn set_private_key_permissions(path: &Path) {
+        use std::os::unix::fs::PermissionsExt;
+
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600)).expect("set key permissions");
+    }
+
+    #[cfg(not(unix))]
+    fn set_private_key_permissions(_path: &Path) {}
+
+    struct TempDir {
+        path: PathBuf,
+    }
+
+    impl TempDir {
+        fn new(prefix: &str) -> std::io::Result<Self> {
+            let path = std::env::temp_dir().join(format!(
+                "{}-{}-{}",
+                prefix,
+                std::process::id(),
+                unique_suffix()
+            ));
+            fs::create_dir(&path)?;
+            Ok(Self { path })
+        }
+
+        fn path(&self) -> &Path {
+            &self.path
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.path);
+        }
+    }
+
+    fn unique_suffix() -> String {
+        use std::sync::atomic::{AtomicU64, Ordering};
+
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let counter = COUNTER.fetch_add(1, Ordering::Relaxed);
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or_default();
+        format!("{nanos}-{counter}")
     }
 }
