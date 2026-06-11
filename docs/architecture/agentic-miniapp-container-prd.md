@@ -257,7 +257,19 @@ cargo run -p dock-cli -- validate examples/coffee-skill
 cargo run -p dock-cli -- call-api examples/coffee-skill searchDrinks '{}'
 cargo run -p dock-cli -- preview-component examples/coffee-skill components/drink-list/index '{"apiName":"searchDrinks","structuredContent":{"drinks":[{"id":"latte","name":"Latte","price":18}]}}'
 cargo run -p dock-cli -- preview-card '{"content":[{"type":"text","text":"paid"}],"structuredContent":{"orderId":"order_demo_001","status":"paid"}}'
-cargo run -p dock-cli -- run-demo --skill examples/coffee-skill --server http://127.0.0.1:3000
+cargo run -p demo-server -- \
+  --host 127.0.0.1 \
+  --port 3000 \
+  --skill examples/coffee-skill \
+  --token-issuer-secret test-only-local-secret \
+  --trusted-did-document <user-did>=/path/to/identity/did_document.json
+cargo run -p dock-cli -- run-demo \
+  --skill examples/coffee-skill \
+  --server http://127.0.0.1:3000 \
+  --did-document /path/to/identity/did_document.json \
+  --private-key /path/to/identity/key-1-private.pem \
+  --user-did <user-did> \
+  --agent-did did:wba:agent.example
 ```
 
 ## 12. 验收标准

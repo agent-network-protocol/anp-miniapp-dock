@@ -371,11 +371,24 @@ cargo fmt --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
 cargo test -p dock-cli --test coffee_order_flow
-cargo run -p demo-server -- --host 127.0.0.1 --port 3000 --skill examples/coffee-skill
+cargo run -p demo-server -- \
+  --host 127.0.0.1 \
+  --port 3000 \
+  --skill examples/coffee-skill \
+  --token-issuer-secret test-only-local-secret \
+  --trusted-did-document <user-did>=/path/to/identity/did_document.json
 cargo run -p dock-cli -- validate examples/coffee-skill
 cargo run -p dock-cli -- call-api examples/coffee-skill searchDrinks '{}'
-cargo run -p dock-cli -- run-demo --skill examples/coffee-skill --server http://127.0.0.1:3000
+cargo run -p dock-cli -- run-demo \
+  --skill examples/coffee-skill \
+  --server http://127.0.0.1:3000 \
+  --did-document /path/to/identity/did_document.json \
+  --private-key /path/to/identity/key-1-private.pem \
+  --user-did <user-did> \
+  --agent-did did:wba:agent.example
 ```
+
+当前 P0.5 auth/token 边界已去除 `demo-signature` 和 `demo-cap-*`：`run-demo` 使用 ANP DID challenge proof 登录 `demo-server`，server 签发 scoped capability token，coffee API route 按 scope 校验 Bearer token。支付 provider、Host renderer 和 consent UI 仍在本阶段之外。
 
 `dock-cli` 子命令：
 

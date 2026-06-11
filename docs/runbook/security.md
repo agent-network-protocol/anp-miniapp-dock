@@ -32,6 +32,10 @@ The demo server verifies ANP DID challenge proofs and issues short-lived scoped 
 }
 ```
 
+Challenge proofs use `anp-http-signature/v1` over a typed payload that binds `challengeId`, nonce, merchant DID, user DID, optional agent DID, Skill ID, session ID, audience, issued time, and expiry. The signer DID must match `userDid`; successful login consumes the challenge so the same proof cannot be replayed.
+
+Capability tokens use the `dock.capability.v1` JWT claim shape. They bind issuer, audience, merchant DID, user DID, optional agent DID, Skill ID, session ID, route scopes, issue/not-before/expiry times, and `jti`. Business routes verify token signature, time validity, merchant/Skill dimensions, and the required route scope before executing.
+
 ## Consent And Audit
 
 Risk is inferred from `mcp.json` metadata such as `_meta.anp.risk` and API shape. `order` and `payment` are treated as high-risk labels.

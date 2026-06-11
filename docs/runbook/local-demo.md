@@ -53,6 +53,8 @@ The server exposes:
 - `POST /api/order/pay`
 - `GET /audit`
 
+The `--trusted-did-document` value must use the same DID that the CLI will sign with. The path points to the public DID document, not the private key.
+
 ## Run CLI Commands
 
 Validate the Skill:
@@ -89,6 +91,20 @@ cargo run -p dock-cli -- run-demo \
   --identity-root /path/to/identity-store/identities
 ```
 
+Equivalent explicit credential flags are also supported:
+
+```bash
+cargo run -p dock-cli -- run-demo \
+  --skill examples/coffee-skill \
+  --server http://127.0.0.1:3000 \
+  --did-document /path/to/identity/did_document.json \
+  --private-key /path/to/identity/key-1-private.pem \
+  --user-did <user-did> \
+  --agent-did did:wba:agent.example
+```
+
+The same values can be supplied through `ANP_DOCK_DID_DOCUMENT`, `ANP_DOCK_PRIVATE_KEY`, `ANP_DOCK_USER_DID`, `ANP_DOCK_AGENT_DID`, `ANP_DOCK_IDENTITY_HANDLE`, and `ANP_DOCK_IDENTITY_ROOT`.
+
 `run-demo` performs:
 
 1. ANP DID challenge/login against `demo-server`.
@@ -118,6 +134,11 @@ This avoids port conflicts in CI-like local runs.
 ## Troubleshooting
 
 - `connection refused`: confirm `demo-server` is running and use the exact printed URL.
+- `DID credential is unavailable for session`: pass either `--did-document` + `--private-key` + `--user-did`, or `--identity-handle` + `--identity-root`.
+- `invalid_signature`: confirm the CLI private key matches the DID document configured in `--trusted-did-document`.
+- `unknown_did`: confirm the server was started with `--trusted-did-document <user-did>=...` and that `<user-did>` matches the CLI signer DID.
+- `scope_mismatch`: confirm the challenge, login request, Skill ID, session ID, user DID, agent DID, and merchant DID are from the same flow.
+- `invalid_token`, `expired_token`, or `insufficient_scope`: rerun `run-demo` to obtain a fresh scoped capability token.
 - `validation_failed`: inspect the `inputSchema` requirements in `examples/coffee-skill/mcp.json`.
 - `component VM failed`: run `cargo test -p component-runtime` and inspect the component `index.js`, `index.wxml`, and `index.wxss`.
 - `consent_required`: production hosts must provide a consent decision. The CLI demo uses a mock approval gate for P0 verification.

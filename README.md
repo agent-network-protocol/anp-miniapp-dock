@@ -21,7 +21,7 @@ The MVP is now implemented as a Cargo workspace. It can load a MiniApp MCP-style
 - `crates/dock-core`: Orchestrator, API registry, permission, consent, audit, and render routing boundaries.
 - `crates/js-runtime-quickjs`: QuickJS-backed atomic API VM using `rquickjs`.
 - `crates/wx-compat`: P0 `wx` capability profiles, scoped storage, request broker traits, and model context helpers.
-- `crates/anp-adapter`: ANP DID-aware signed HTTP, challenge/login contracts, allowlist, and capability token cache.
+- `crates/anp-adapter`: ANP DID-aware signed HTTP, challenge proof contracts, allowlist, and scoped capability token cache.
 - `crates/consent-audit`: risk policy, mock consent provider, proof, audit records, and redaction.
 - `crates/card-spec`: structured fallback card schema.
 - `crates/component-runtime`: Component VM, WXML/WXSS subset compiler, events, and Render IR.
@@ -87,13 +87,13 @@ P0 implemented:
 - `SKILL.md`, `mcp.json`, `apis[]`, `components[]`, `_meta.ui.componentPath`.
 - Atomic API JS loading with restricted CommonJS, `wx.modelContext.createSkill`, `registerAPI`, middleware, input validation, timeout, and sandboxed globals.
 - Runtime boundaries for permission, consent, audit, render routing, and model-visible result filtering.
-- ANP DID-aware adapter contracts, signed request helper, allowlist, and scoped capability token cache.
+- ANP DID-aware adapter contracts, signed request helper, `anp-http-signature/v1` challenge proof, allowlist, and scoped capability token cache.
 - Component runtime subset: `Component({})`, `data`, `properties`, `methods`, `created/attached/detached`, `setData`, `NotificationType.Input/Result/Expire`, `sendFollowUpMessage`, `api/call`, `expirePreviousCards`, tap/image events, WXML/WXSS subset, Render IR JSON.
 - CardSpec fallback for structured results or render failures.
 - Coffee merchant demo server and CLI/E2E flow.
 
-P0 intentionally does not implement a real Flutter host, complete WXML/WXSS, full component/page routing, WeChat login, real payment, cloud development, social APIs, or production token standards.
+P0.5 auth/token now uses real ANP DID challenge signing and scoped capability tokens for the demo server flow. The runtime still intentionally does not implement a real Flutter host, complete WXML/WXSS, full component/page routing, WeChat login, real payment provider, cloud development, social APIs, consent UI, or host renderer.
 
 ## Security Notes
 
-Do not commit private keys, DID credentials, capability tokens, merchant secrets, or real user data. The coffee Skill and demo server use mock-only data. Runtime code should keep DID signing, tokens, and high-risk authorization below the Skill/CLI boundary, and user-facing output should redact tokens and signatures.
+Do not commit private keys, DID credentials, capability tokens, merchant secrets, or real user data. The coffee Skill and demo server use mock-only business data, but challenge/login and capability tokens are no longer mock. Runtime code should keep DID signing, tokens, and high-risk authorization below the Skill/CLI boundary, and user-facing output should redact tokens and signatures.
