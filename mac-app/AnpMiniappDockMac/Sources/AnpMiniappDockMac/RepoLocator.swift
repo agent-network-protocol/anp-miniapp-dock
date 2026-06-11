@@ -9,6 +9,7 @@ enum RepoLocator {
         }
 
         var starts = [URL(fileURLWithPath: fm.currentDirectoryPath).standardizedFileURL]
+        starts.append(URL(fileURLWithPath: #filePath).standardizedFileURL)
         starts.append(Bundle.main.bundleURL.standardizedFileURL)
         if let executable = Bundle.main.executableURL?.standardizedFileURL {
             starts.append(executable.deletingLastPathComponent())
