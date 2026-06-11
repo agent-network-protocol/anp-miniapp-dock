@@ -412,6 +412,7 @@ final class CoffeeInteractiveRuntime: @unchecked Sendable {
             drinks: drinks,
             contentText: contentText(result, fallback: "请选择一杯咖啡。"),
             componentPath: componentPath(output, fallback: "components/drink-list/index"),
+            renderRoot: renderRoot(output),
             authSummary: authSummary(result)
         )
     }
@@ -425,6 +426,7 @@ final class CoffeeInteractiveRuntime: @unchecked Sendable {
             payable: structured["payable"] as? Int ?? (structured["payable"] as? NSNumber)?.intValue ?? 0,
             contentText: contentText(result, fallback: "请确认订单。"),
             componentPath: componentPath(output, fallback: "components/order-confirm/index"),
+            renderRoot: renderRoot(output),
             authSummary: authSummary(result)
         )
     }
@@ -437,6 +439,7 @@ final class CoffeeInteractiveRuntime: @unchecked Sendable {
             status: structured.string("status", default: "unknown"),
             contentText: contentText(result, fallback: "支付完成。"),
             componentPath: componentPath(output, fallback: "components/payment-result/index"),
+            renderRoot: renderRoot(output),
             authSummary: authSummary(result)
         )
     }
@@ -449,6 +452,15 @@ final class CoffeeInteractiveRuntime: @unchecked Sendable {
 
     private static func componentPath(_ output: [String: Any], fallback: String) -> String {
         output.dictionary("render").string("componentPath", default: fallback)
+    }
+
+    private static func renderRoot(_ output: [String: Any]) -> MiniAppRenderNode? {
+        let root = output
+            .dictionary("render")
+            .dictionary("payload")
+            .dictionary("render")
+            .dictionary("root")
+        return MiniAppRenderNode(object: root)
     }
 
     private static func authSummary(_ result: [String: Any]) -> String {

@@ -86,6 +86,21 @@ orders: dict[str, dict[str, Any]] = {}
 audit_records: list[dict[str, Any]] = []
 
 
+def normalize_drink_query(query: str | None) -> str:
+    text = (query or "").strip().lower()
+    if not text:
+        return ""
+    if "拿铁" in text or "latte" in text:
+        return "latte"
+    if "美式" in text or "americano" in text:
+        return "americano"
+    if "摩卡" in text or "mocha" in text:
+        return "mocha"
+    if text in {"咖啡", "coffee"} or "点咖啡" in text or "喝咖啡" in text or "点一杯咖啡" in text:
+        return ""
+    return text
+
+
 def raise_auth(error: AuthFailure) -> None:
     raise HTTPException(status_code=error.status_code, detail=auth_failure_detail(error))
 
@@ -320,7 +335,7 @@ def wx_login(request: WxLoginRequest, authorization: str | None = Header(default
 @app.get("/api/drinks")
 def search_drinks(query: str | None = Query(default=None), authorization: str | None = Header(default=None)) -> dict[str, Any]:
     claims = authorize(authorization, SCOPE_DRINKS_READ)
-    needle = (query or "").lower()
+    needle = normalize_drink_query(query)
     drinks = [drink for drink in DRINKS if not needle or needle in drink["id"] or needle in drink["name"].lower()]
     record_audit("api.drinks", "ok", sessionId=claims["sessionId"], skillId=claims["skillId"], userDid=claims["userDid"])
     return {"drinks": drinks}

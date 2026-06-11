@@ -303,6 +303,7 @@ struct CoffeeDrinkListCard: Sendable, Equatable {
     let drinks: [CoffeeDrink]
     let contentText: String
     let componentPath: String
+    let renderRoot: MiniAppRenderNode?
     let authSummary: String
 }
 
@@ -312,6 +313,7 @@ struct CoffeeOrderCard: Sendable, Equatable {
     let payable: Int
     let contentText: String
     let componentPath: String
+    let renderRoot: MiniAppRenderNode?
     let authSummary: String
 }
 
@@ -320,6 +322,7 @@ struct CoffeePaymentCard: Sendable, Equatable {
     let status: String
     let contentText: String
     let componentPath: String
+    let renderRoot: MiniAppRenderNode?
     let authSummary: String
 }
 
@@ -327,6 +330,76 @@ enum CoffeeInteractiveCard: Sendable, Equatable {
     case drinkList(CoffeeDrinkListCard)
     case orderConfirm(CoffeeOrderCard)
     case paymentResult(CoffeePaymentCard)
+}
+
+struct MiniAppRenderEvent: Sendable, Equatable {
+    let event: String
+    let method: String
+    let dataset: [String: String]
+
+    init?(object: [String: Any]) {
+        let event = object.string("event", default: "")
+        let method = object.string("method", default: "")
+        guard !event.isEmpty, !method.isEmpty else { return nil }
+        self.event = event
+        self.method = method
+        self.dataset = object.dictionary("dataset").reduce(into: [String: String]()) { output, item in
+            output[item.key] = JSONObject.describe(item.value)
+        }
+    }
+}
+
+struct MiniAppRenderNode: Identifiable, Sendable, Equatable {
+    let id: String
+    let kind: String
+    let text: String?
+    let props: [String: String]
+    let style: [String: String]
+    let events: [MiniAppRenderEvent]
+    let children: [MiniAppRenderNode]
+
+    init?(object: [String: Any]) {
+        let id = object.string("id", default: "")
+        let kind = object.string("kind", default: "")
+        guard !id.isEmpty, !kind.isEmpty else { return nil }
+        self.id = id
+        self.kind = kind
+        self.text = object["text"] as? String
+        self.props = object.dictionary("props").reduce(into: [String: String]()) { output, item in
+            output[item.key] = JSONObject.describe(item.value)
+        }
+        self.style = object.dictionary("style").reduce(into: [String: String]()) { output, item in
+            output[item.key] = JSONObject.describe(item.value)
+        }
+        self.events = object.array("events").compactMap { item in
+            guard let event = item as? [String: Any] else { return nil }
+            return MiniAppRenderEvent(object: event)
+        }
+        self.children = object.array("children").compactMap { item in
+            guard let child = item as? [String: Any] else { return nil }
+            return MiniAppRenderNode(object: child)
+        }
+    }
+
+    var firstTapEvent: MiniAppRenderEvent? {
+        events.first { $0.event == "tap" }
+    }
+
+    var plainText: String {
+        if let text, !text.trimmed().isEmpty {
+            return text
+        }
+        return children.map(\.plainText).joined(separator: " ").trimmed()
+    }
+
+    var buttonCount: Int {
+        (kind == "button" ? 1 : 0) + children.reduce(0) { $0 + $1.buttonCount }
+    }
+
+    var tapButtonTitles: [String] {
+        let own = kind == "button" && firstTapEvent != nil ? [plainText] : []
+        return own + children.flatMap(\.tapButtonTitles)
+    }
 }
 
 enum SnapshotParseError: LocalizedError {

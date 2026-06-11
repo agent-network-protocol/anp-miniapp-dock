@@ -86,7 +86,7 @@ struct ContentView: View {
                             .id(message.id)
                     }
                     if viewModel.isRunning {
-                        TypingBubble()
+                        TypingBubble(statusText: viewModel.statusText)
                             .id("typing")
                     }
                 }
@@ -256,37 +256,47 @@ private struct DrinkListInteractiveCard: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
 
-                VStack(spacing: 10) {
-                    if model.drinks.isEmpty {
-                        Text("当前没有可选择的饮品，请重新输入咖啡需求。")
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                            .padding(12)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                if let renderRoot = model.renderRoot {
+                    MiniAppRenderTreeView(root: renderRoot, isRunning: isRunning) { event in
+                        guard event.method == "confirmDrink",
+                              let drinkId = event.dataset["id"],
+                              let drink = model.drinks.first(where: { $0.id == drinkId })
+                        else { return }
+                        onSelectDrink(drink)
                     }
-                    ForEach(model.drinks) { drink in
-                        HStack(spacing: 12) {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text(drink.name)
-                                    .font(.headline)
-                                Text("drinkId=\(drink.id)")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Text("¥\(drink.price)")
-                                .font(.headline)
-                            Button {
-                                onSelectDrink(drink)
-                            } label: {
-                                Label("选择", systemImage: "hand.tap.fill")
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .disabled(isRunning)
+                } else {
+                    VStack(spacing: 10) {
+                        if model.drinks.isEmpty {
+                            Text("当前没有可选择的饮品，请重新输入咖啡需求。")
+                                .font(.callout)
+                                .foregroundStyle(.secondary)
+                                .padding(12)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
                         }
-                        .padding(12)
-                        .background(.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        ForEach(model.drinks) { drink in
+                            HStack(spacing: 12) {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text(drink.name)
+                                        .font(.headline)
+                                    Text("drinkId=\(drink.id)")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Text("¥\(drink.price)")
+                                    .font(.headline)
+                                Button {
+                                    onSelectDrink(drink)
+                                } label: {
+                                    Label("选择", systemImage: "hand.tap.fill")
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(isRunning)
+                            }
+                            .padding(12)
+                            .background(.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                        }
                     }
                 }
 
@@ -315,21 +325,28 @@ private struct OrderConfirmInteractiveCard: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
 
-                VStack(alignment: .leading, spacing: 8) {
-                    EvidenceRow(label: "订单", value: model.orderId)
-                    EvidenceRow(label: "饮品", value: model.drinkId)
-                    EvidenceRow(label: "应付", value: "¥\(model.payable)")
-                }
+                if let renderRoot = model.renderRoot {
+                    MiniAppRenderTreeView(root: renderRoot, isRunning: isRunning) { event in
+                        guard event.method == "payOrder" else { return }
+                        onPayOrder(model)
+                    }
+                } else {
+                    VStack(alignment: .leading, spacing: 8) {
+                        EvidenceRow(label: "订单", value: model.orderId)
+                        EvidenceRow(label: "饮品", value: model.drinkId)
+                        EvidenceRow(label: "应付", value: "¥\(model.payable)")
+                    }
 
-                Button {
-                    onPayOrder(model)
-                } label: {
-                    Label("支付 ¥\(model.payable)", systemImage: "creditcard.fill")
-                        .frame(maxWidth: .infinity)
+                    Button {
+                        onPayOrder(model)
+                    } label: {
+                        Label("支付 ¥\(model.payable)", systemImage: "creditcard.fill")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .disabled(isRunning)
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .disabled(isRunning)
 
                 FlowHint(text: "点击支付 = 触发组件 payOrder 事件 → api/call payOrder")
                 AuthBoundaryLabel(text: model.authSummary)
@@ -353,14 +370,126 @@ private struct PaymentResultInteractiveCard: View {
                 Text(model.contentText)
                     .font(.callout)
                     .foregroundStyle(.secondary)
-                VStack(alignment: .leading, spacing: 8) {
-                    EvidenceRow(label: "订单", value: model.orderId)
-                    EvidenceRow(label: "状态", value: model.status)
+                if let renderRoot = model.renderRoot {
+                    MiniAppRenderTreeView(root: renderRoot, isRunning: false) { _ in }
+                } else {
+                    VStack(alignment: .leading, spacing: 8) {
+                        EvidenceRow(label: "订单", value: model.orderId)
+                        EvidenceRow(label: "状态", value: model.status)
+                    }
                 }
                 FlowHint(text: "支付完成后，容器会触发 expirePreviousCards，使上一张确认订单卡片过期。")
                 AuthBoundaryLabel(text: model.authSummary)
             }
         }
+    }
+}
+
+private struct MiniAppRenderTreeView: View {
+    let root: MiniAppRenderNode
+    let isRunning: Bool
+    let onTap: (MiniAppRenderEvent) -> Void
+
+    var body: some View {
+        MiniAppRenderNodeView(node: root, isRunning: isRunning, onTap: onTap)
+            .padding(10)
+            .background(.background.opacity(0.85), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(.quaternary, lineWidth: 1)
+            )
+    }
+}
+
+private struct MiniAppRenderNodeView: View {
+    let node: MiniAppRenderNode
+    let isRunning: Bool
+    let onTap: (MiniAppRenderEvent) -> Void
+
+    var body: some View {
+        switch node.kind {
+        case "text":
+            Text(node.plainText)
+                .font(font)
+                .foregroundStyle(foregroundColor)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        case "button":
+            Button {
+                if let event = node.firstTapEvent {
+                    onTap(event)
+                }
+            } label: {
+                Text(buttonTitle)
+                    .frame(minWidth: 72)
+            }
+            .buttonStyle(.borderedProminent)
+            .disabled(isRunning || node.firstTapEvent == nil)
+        case "image":
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(.secondary.opacity(0.10))
+                .overlay(
+                    Image(systemName: "photo")
+                        .foregroundStyle(.secondary)
+                )
+                .frame(width: 120, height: 72)
+        case "scroll-view":
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(alignment: .top, spacing: 10) {
+                    childViews
+                }
+                .padding(.vertical, 2)
+            }
+        default:
+            if isRow {
+                HStack(alignment: .top, spacing: 10) {
+                    childViews
+                }
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    childViews
+                }
+                .padding(node.kind == "view" ? 8 : 0)
+                .background(cardBackground)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var childViews: some View {
+        ForEach(node.children) { child in
+            MiniAppRenderNodeView(node: child, isRunning: isRunning, onTap: onTap)
+        }
+    }
+
+    private var buttonTitle: String {
+        let text = node.plainText
+        if !text.isEmpty { return text }
+        return node.firstTapEvent?.method ?? "操作"
+    }
+
+    private var isRow: Bool {
+        node.style["flexDirection"] == "row" || node.style["display"] == "flex" && node.children.count <= 3
+    }
+
+    private var cardBackground: some ShapeStyle {
+        node.style["border"] != nil || node.style["background"] != nil
+            ? AnyShapeStyle(.secondary.opacity(0.06))
+            : AnyShapeStyle(.clear)
+    }
+
+    private var foregroundColor: Color {
+        if node.style["color"] == "#2f6f5e" {
+            return .green
+        }
+        return .primary
+    }
+
+    private var font: Font {
+        if node.style["fontWeight"] == "600" {
+            return .headline
+        }
+        return .callout
     }
 }
 
@@ -416,6 +545,8 @@ private struct AuthBoundaryLabel: View {
 }
 
 private struct TypingBubble: View {
+    let statusText: String
+
     var body: some View {
         HStack {
             VStack(alignment: .leading, spacing: 8) {
@@ -425,7 +556,7 @@ private struct TypingBubble: View {
                 HStack(spacing: 10) {
                     ProgressView()
                         .controlSize(.small)
-                    Text("正在识别意图并调用小程序容器…")
+                    Text("正在处理：\(statusText)")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }

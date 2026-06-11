@@ -203,6 +203,18 @@ async fn auth_challenge_login_and_coffee_order_flow_succeed() {
         .as_str()
         .unwrap()
         .contains("latte"));
+    let generic_coffee = json_response(
+        addr,
+        "GET",
+        "/api/drinks?query=%E5%92%96%E5%95%A1",
+        Some(&token),
+        None,
+    );
+    assert!(generic_coffee["drinks"]
+        .as_array()
+        .expect("drinks array")
+        .iter()
+        .any(|drink| drink["id"] == "latte"));
 
     let order = json_response(
         addr,

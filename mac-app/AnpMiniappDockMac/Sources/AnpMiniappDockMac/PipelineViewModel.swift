@@ -205,48 +205,52 @@ struct ChatbotTurnRunner {
     }
 
     func recognize(userText: String) async throws -> ChatbotTurnResult {
-        let repoRoot = RepoLocator.findRepoRoot() ?? URL(fileURLWithPath: "")
-        let intent = try await IntentRecognizer().recognize(userText: userText)
-        let output = [ChatMessage(
-            role: .assistant,
-            text: "意图识别完成：\(intent.intent.displayName)",
-            detail: "来源：\(intent.source.displayName)；置信度：\(Int(intent.confidence * 100))%。\(intent.userFacingSummary)"
-        )]
-        return ChatbotTurnResult(repoRoot: repoRoot, intent: intent, messages: output)
+        try await Task.detached(priority: .userInitiated) {
+            let repoRoot = RepoLocator.findRepoRoot() ?? URL(fileURLWithPath: "")
+            let intent = try await IntentRecognizer().recognize(userText: userText)
+            let output = [ChatMessage(
+                role: .assistant,
+                text: "意图识别完成：\(intent.intent.displayName)",
+                detail: "来源：\(intent.source.displayName)；置信度：\(Int(intent.confidence * 100))%。\(intent.userFacingSummary)"
+            )]
+            return ChatbotTurnResult(repoRoot: repoRoot, intent: intent, messages: output)
+        }.value
     }
 
     func run(userText: String) async throws -> ChatbotTurnResult {
-        guard let repoRoot = RepoLocator.findRepoRoot() else {
-            throw DemoPipelineError.repoRootNotFound
-        }
+        try await Task.detached(priority: .userInitiated) {
+            guard let repoRoot = RepoLocator.findRepoRoot() else {
+                throw DemoPipelineError.repoRootNotFound
+            }
 
-        let recognizer = IntentRecognizer()
-        let intent = try await recognizer.recognize(userText: userText)
-        var output = [ChatMessage(
-            role: .assistant,
-            text: "意图识别完成：\(intent.intent.displayName)",
-            detail: "来源：\(intent.source.displayName)；置信度：\(Int(intent.confidence * 100))%。\(intent.userFacingSummary)"
-        )]
+            let recognizer = IntentRecognizer()
+            let intent = try await recognizer.recognize(userText: userText)
+            var output = [ChatMessage(
+                role: .assistant,
+                text: "意图识别完成：\(intent.intent.displayName)",
+                detail: "来源：\(intent.source.displayName)；置信度：\(Int(intent.confidence * 100))%。\(intent.userFacingSummary)"
+            )]
 
-        switch intent.intent {
-        case .coffeeOrder:
-            let run = try await DemoPipelineRunner().runAsync()
-            output.append(ChatMessage(
-                role: .assistant,
-                text: "已调用本地小程序容器并执行 Coffee Skill。下面是 Skill 返回的组件渲染结果。",
-                detail: "Skill: examples/coffee-skill；服务：\(run.snapshot.serverBaseURL)；流程：searchDrinks → confirmOrder → payOrder → expire。",
-                snapshot: run.snapshot,
-                logLines: run.logLines
-            ))
-            return ChatbotTurnResult(repoRoot: run.repoRoot, intent: intent, messages: output)
-        case .unknown:
-            output.append(ChatMessage(
-                role: .assistant,
-                text: "当前 Demo 只接入了咖啡点单 Skill。你可以试试：我要点一杯咖啡。",
-                detail: "没有调用小程序容器。"
-            ))
-            return ChatbotTurnResult(repoRoot: repoRoot, intent: intent, messages: output)
-        }
+            switch intent.intent {
+            case .coffeeOrder:
+                let run = try await DemoPipelineRunner().runAsync()
+                output.append(ChatMessage(
+                    role: .assistant,
+                    text: "已调用本地小程序容器并执行 Coffee Skill。下面是 Skill 返回的组件渲染结果。",
+                    detail: "Skill: examples/coffee-skill；服务：\(run.snapshot.serverBaseURL)；流程：searchDrinks → confirmOrder → payOrder → expire。",
+                    snapshot: run.snapshot,
+                    logLines: run.logLines
+                ))
+                return ChatbotTurnResult(repoRoot: run.repoRoot, intent: intent, messages: output)
+            case .unknown:
+                output.append(ChatMessage(
+                    role: .assistant,
+                    text: "当前 Demo 只接入了咖啡点单 Skill。你可以试试：我要点一杯咖啡。",
+                    detail: "没有调用小程序容器。"
+                ))
+                return ChatbotTurnResult(repoRoot: repoRoot, intent: intent, messages: output)
+            }
+        }.value
     }
 }
 
@@ -355,6 +359,8 @@ struct OpenAIConfig: Sendable {
 }
 
 enum ShellEnvironmentLoader {
+    private static let shellEnvironmentTimeout: TimeInterval = 2
+
     static func loadOpenAIConfig() -> OpenAIConfig {
         var environment = ProcessInfo.processInfo.environment
         if environment["ANP_DOCK_DISABLE_OPENAI"] == "1" {
@@ -383,12 +389,21 @@ enum ShellEnvironmentLoader {
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = Pipe()
+        let finished = DispatchSemaphore(value: 0)
+        process.terminationHandler = { _ in finished.signal() }
+
         do {
             try process.run()
-            process.waitUntilExit()
         } catch {
             return nil
         }
+
+        if finished.wait(timeout: .now() + shellEnvironmentTimeout) == .timedOut {
+            process.terminate()
+            _ = finished.wait(timeout: .now() + 1)
+            return nil
+        }
+
         guard process.terminationStatus == 0 else { return nil }
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         let text = String(data: data, encoding: .utf8) ?? ""
@@ -404,6 +419,8 @@ enum ShellEnvironmentLoader {
 }
 
 struct OpenAIIntentClient {
+    private static let requestTimeout: TimeInterval = 8
+
     let config: OpenAIConfig
 
     func recognize(userText: String) async throws -> IntentResult {
@@ -429,7 +446,7 @@ struct OpenAIIntentClient {
         request.httpMethod = "POST"
         request.setValue("Bearer \(config.apiKey)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        request.timeoutInterval = 20
+        request.timeoutInterval = Self.requestTimeout
         request.httpBody = requestData
 
         let (data, response) = try await URLSession.shared.data(for: request)

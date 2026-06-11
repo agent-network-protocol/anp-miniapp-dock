@@ -95,7 +95,7 @@ impl Default for CoffeeStore {
 
 impl CoffeeStore {
     pub fn search_drinks(&self, query: Option<&str>) -> DrinksResponse {
-        let query = query.unwrap_or_default().to_ascii_lowercase();
+        let query = normalize_drink_query(query);
         let drinks = self
             .data
             .lock()
@@ -154,6 +154,31 @@ impl CoffeeStore {
             .cloned()
             .ok_or(CoffeeError::UnknownOrder)
     }
+}
+
+fn normalize_drink_query(query: Option<&str>) -> String {
+    let query = query.unwrap_or_default().trim().to_lowercase();
+    if query.is_empty() {
+        return String::new();
+    }
+    if query.contains("拿铁") || query.contains("latte") {
+        return "latte".to_owned();
+    }
+    if query.contains("美式") || query.contains("americano") {
+        return "americano".to_owned();
+    }
+    if query.contains("摩卡") || query.contains("mocha") {
+        return "mocha".to_owned();
+    }
+    if query == "咖啡"
+        || query == "coffee"
+        || query.contains("点咖啡")
+        || query.contains("喝咖啡")
+        || query.contains("点一杯咖啡")
+    {
+        return String::new();
+    }
+    query
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

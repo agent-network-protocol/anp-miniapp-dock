@@ -65,20 +65,20 @@ struct AnpMiniappDockMacApp: App {
                 [
                     "type": "drink-list",
                     "componentPath": drinks.componentPath,
-                    "buttonCount": drinks.drinks.count,
-                    "buttons": drinks.drinks.map { "选择 \($0.name)" }
+                    "buttonCount": drinks.renderRoot?.buttonCount ?? 0,
+                    "buttons": drinks.renderRoot?.tapButtonTitles ?? []
                 ],
                 [
                     "type": "order-confirm",
                     "componentPath": order.componentPath,
-                    "buttonCount": 1,
-                    "buttons": ["支付 ¥\(order.payable)"],
+                    "buttonCount": order.renderRoot?.buttonCount ?? 0,
+                    "buttons": order.renderRoot?.tapButtonTitles ?? [],
                     "orderId": order.orderId
                 ],
                 [
                     "type": "payment-result",
                     "componentPath": payment.componentPath,
-                    "buttonCount": 0,
+                    "buttonCount": payment.renderRoot?.buttonCount ?? 0,
                     "orderId": payment.orderId,
                     "status": payment.status
                 ]
