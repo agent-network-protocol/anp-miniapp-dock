@@ -1,6 +1,6 @@
 # 分享内容来源映射
 
-本 PPT 主要依据 `docs/architecture/` 中的架构文档，并参考 `../AgentNetworkProtocol` 中 DID-WBA 身份认证规范的关键流程。
+本 PPT 主要依据 `docs/architecture/` 中的架构文档，并参考 `../../../AgentNetworkProtocol` 中 DID-WBA 身份认证规范的关键流程。
 
 ## 本仓库架构文档
 
@@ -29,7 +29,7 @@
 
 ## ANP DID-WBA 认证规范参考
 
-参考文件：`../../AgentNetworkProtocol/chinese/03-did-wba方法规范.md`。
+参考文件：`../../../AgentNetworkProtocol/chinese/03-did-wba方法规范.md`。
 
 PPT 第 8 页口播中的登录/验签流程对应 DID-WBA 规范中跨平台身份认证流程：
 
