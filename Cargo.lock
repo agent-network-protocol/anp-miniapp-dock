@@ -493,7 +493,10 @@ dependencies = [
 name = "demo-server"
 version = "0.1.0"
 dependencies = [
+ "anp",
+ "anp-adapter",
  "axum",
+ "rand 0.8.6",
  "serde",
  "serde_json",
  "tokio",
@@ -546,6 +549,7 @@ dependencies = [
 name = "dock-cli"
 version = "0.1.0"
 dependencies = [
+ "anp",
  "anp-adapter",
  "axum",
  "card-spec",

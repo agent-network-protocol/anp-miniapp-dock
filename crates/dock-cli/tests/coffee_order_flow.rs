@@ -1,3 +1,5 @@
+use anp::authentication::{create_did_wba_document, DidDocumentOptions};
+use demo_server::auth::ServerAuthConfig;
 use demo_server::{app, DemoState};
 use dock_cli::{run_with_writer, Cli};
 use serde_json::{json, Value};
@@ -15,8 +17,10 @@ fn skill_root() -> PathBuf {
     repo_root().join("examples/coffee-skill")
 }
 
-async fn spawn_server() -> String {
-    let state = DemoState::new(skill_root());
+async fn spawn_server(fixture: &DidFixture) -> String {
+    let auth_config = ServerAuthConfig::for_tests()
+        .with_trusted_did_document(fixture.did(), fixture.did_path.clone());
+    let state = DemoState::with_auth_config(skill_root(), auth_config);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("bind demo server");
@@ -46,7 +50,8 @@ fn cli_json_result(args: impl IntoIterator<Item = String>) -> Result<Value, Stri
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn dock_cli_runs_coffee_order_flow_end_to_end() {
-    let server = spawn_server().await;
+    let fixture = DidFixture::new();
+    let server = spawn_server(&fixture).await;
     let skill = skill_root().display().to_string();
 
     let validate = cli_json(["dock-cli".to_owned(), "validate".to_owned(), skill.clone()]);
@@ -104,6 +109,14 @@ async fn dock_cli_runs_coffee_order_flow_end_to_end() {
         skill,
         "--server".to_owned(),
         server,
+        "--did-document".to_owned(),
+        fixture.did_path.display().to_string(),
+        "--private-key".to_owned(),
+        fixture.key_path.display().to_string(),
+        "--user-did".to_owned(),
+        fixture.did(),
+        "--agent-did".to_owned(),
+        "did:wba:agent.example".to_owned(),
     ]);
     assert_eq!(demo["status"], "ok");
     assert_eq!(demo["server"]["auth"]["tokenReceived"], true);
@@ -151,4 +164,87 @@ fn preview_card_falls_back_for_error_result() {
     assert_eq!(card["status"], "ok");
     assert_eq!(card["card"]["status"], "error");
     assert_eq!(card["card"]["fallbackReason"], "api_error");
+}
+
+struct DidFixture {
+    _dir: TempDir,
+    did_document: Value,
+    did_path: PathBuf,
+    key_path: PathBuf,
+}
+
+impl DidFixture {
+    fn new() -> Self {
+        let bundle = create_did_wba_document("user.example", DidDocumentOptions::default())
+            .expect("DID fixture creates");
+        let dir = TempDir::new("dock-cli-coffee-flow").expect("temp dir creates");
+        let did_path = dir.path().join("did.json");
+        let key_path = dir.path().join("key.pem");
+        std::fs::write(&did_path, serde_json::to_vec(&bundle.did_document).unwrap()).unwrap();
+        std::fs::write(&key_path, &bundle.keys["key-1"].private_key_pem).unwrap();
+        set_private_key_permissions(&key_path);
+        Self {
+            _dir: dir,
+            did_document: bundle.did_document,
+            did_path,
+            key_path,
+        }
+    }
+
+    fn did(&self) -> String {
+        self.did_document["id"]
+            .as_str()
+            .expect("fixture has DID")
+            .to_owned()
+    }
+}
+
+#[cfg(unix)]
+fn set_private_key_permissions(path: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+        .expect("set key permissions");
+}
+
+#[cfg(not(unix))]
+fn set_private_key_permissions(_path: &Path) {}
+
+struct TempDir {
+    path: PathBuf,
+}
+
+impl TempDir {
+    fn new(prefix: &str) -> std::io::Result<Self> {
+        let path = std::env::temp_dir().join(format!(
+            "{}-{}-{}",
+            prefix,
+            std::process::id(),
+            unique_suffix()
+        ));
+        std::fs::create_dir(&path)?;
+        Ok(Self { path })
+    }
+
+    fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
+}
+
+fn unique_suffix() -> String {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let counter = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or_default();
+    format!("{nanos}-{counter}")
 }

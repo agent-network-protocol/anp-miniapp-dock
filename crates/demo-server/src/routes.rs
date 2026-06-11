@@ -1,8 +1,9 @@
 use crate::audit::{AuditLog, AuditRecord};
 use crate::auth::{
-    AuthError, AuthStore, ChallengeLoginRequest, ChallengeRequest, ServerAuthConfig, TokenRecord,
+    login_audience, AuthError, AuthStore, ChallengeLoginRequest, ChallengeRequest, ServerAuthConfig,
 };
 use crate::coffee::{CoffeeError, CoffeeStore, ConfirmOrderRequest, PayOrderRequest};
+use anp_adapter::{CapabilityTokenClaims, ExpectedCapability};
 use axum::extract::{Path, Query, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -17,6 +18,11 @@ use std::sync::Arc;
 
 const AGENT_ID: &str = "coffee";
 const DEFAULT_MERCHANT_DID: &str = "did:wba:coffee-merchant.example";
+const DEFAULT_PUBLIC_BASE_URL: &str = "http://127.0.0.1:3000";
+const SCOPE_DRINKS_READ: &str = "coffee:drinks:read";
+const SCOPE_ORDER_CONFIRM: &str = "coffee:order:confirm";
+const SCOPE_ORDER_PAY: &str = "coffee:order:pay";
+const SCOPE_ORDER_READ: &str = "coffee:order:read";
 
 #[derive(Debug, Clone)]
 pub struct DemoState {
@@ -57,12 +63,12 @@ impl DemoState {
         &self.inner.auth_config
     }
 
-    pub fn insert_token_for_test(&self, record: TokenRecord) {
-        self.inner.auth.insert_token(record);
-    }
-
     pub fn audit_records(&self) -> Vec<crate::audit::AuditRecord> {
         self.inner.audit.records()
+    }
+
+    pub fn public_base_url(&self) -> &str {
+        DEFAULT_PUBLIC_BASE_URL
     }
 }
 
@@ -156,10 +162,12 @@ async fn auth_challenge(
     State(state): State<DemoState>,
     Json(request): Json<ChallengeRequest>,
 ) -> Json<Value> {
-    let challenge = state
-        .inner
-        .auth
-        .challenge(&state.inner.auth_config.merchant_did, request.clone());
+    let challenge = state.inner.auth.challenge(
+        &state.inner.auth_config.merchant_did,
+        &login_audience(state.public_base_url()),
+        state.inner.auth_config.challenge_ttl_ms,
+        request.clone(),
+    );
     state
         .inner
         .audit
@@ -180,11 +188,7 @@ async fn auth_login(
         Some(request.skill_id.clone()),
         Some(request.user_did.clone()),
     );
-    match state
-        .inner
-        .auth
-        .login(&state.inner.auth_config.merchant_did, request)
-    {
+    match state.inner.auth.login(&state.inner.auth_config, request) {
         Ok(response) => {
             state
                 .inner
@@ -222,15 +226,15 @@ async fn search_drinks(
     headers: HeaderMap,
     Query(query): Query<DrinksQuery>,
 ) -> Result<Json<Value>, ApiError> {
-    let token = authorize(&state, &headers)?;
+    let claims = authorize(&state, &headers, SCOPE_DRINKS_READ)?;
     let response = state.inner.coffee.search_drinks(query.query.as_deref());
     state
         .inner
         .audit
         .record(AuditRecord::new("api.drinks", "ok").with_scope(
-            Some(token.scope.session_id),
-            Some(token.scope.skill_id),
-            Some(token.scope.user_did),
+            Some(claims.session_id),
+            Some(claims.skill_id),
+            Some(claims.user_did),
         ));
     Ok(Json(
         serde_json::to_value(response).expect("drinks serialize"),
@@ -242,7 +246,7 @@ async fn confirm_order(
     headers: HeaderMap,
     Json(parameters): Json<Value>,
 ) -> Result<Json<Value>, ApiError> {
-    let token = authorize(&state, &headers)?;
+    let claims = authorize(&state, &headers, SCOPE_ORDER_CONFIRM)?;
     let request =
         serde_json::from_value::<ConfirmOrderRequest>(parameters.clone()).map_err(|error| {
             ApiError::bad_request(format!("invalid confirm order request: {error}"))
@@ -252,9 +256,9 @@ async fn confirm_order(
             state.inner.audit.record(
                 AuditRecord::new("api.order.confirm", "ok")
                     .with_scope(
-                        Some(token.scope.session_id),
-                        Some(token.scope.skill_id),
-                        Some(token.scope.user_did),
+                        Some(claims.session_id),
+                        Some(claims.skill_id),
+                        Some(claims.user_did),
                     )
                     .with_order(order.order_id.clone())
                     .with_parameters(&parameters),
@@ -270,7 +274,7 @@ async fn pay_order(
     headers: HeaderMap,
     Json(parameters): Json<Value>,
 ) -> Result<Json<Value>, ApiError> {
-    let token = authorize(&state, &headers)?;
+    let claims = authorize(&state, &headers, SCOPE_ORDER_PAY)?;
     let request = serde_json::from_value::<PayOrderRequest>(parameters.clone())
         .map_err(|error| ApiError::bad_request(format!("invalid pay order request: {error}")))?;
     match state.inner.coffee.pay_order(request) {
@@ -278,9 +282,9 @@ async fn pay_order(
             state.inner.audit.record(
                 AuditRecord::new("api.order.pay", "ok")
                     .with_scope(
-                        Some(token.scope.session_id),
-                        Some(token.scope.skill_id),
-                        Some(token.scope.user_did),
+                        Some(claims.session_id),
+                        Some(claims.skill_id),
+                        Some(claims.user_did),
                     )
                     .with_order(order.order_id.clone())
                     .with_parameters(&parameters),
@@ -296,27 +300,46 @@ async fn get_order(
     headers: HeaderMap,
     Path(order_id): Path<String>,
 ) -> Result<Json<Value>, ApiError> {
-    authorize(&state, &headers)?;
-    state
+    let claims = authorize(&state, &headers, SCOPE_ORDER_READ)?;
+    let order = state
         .inner
         .coffee
         .get_order(&order_id)
-        .map(|order| Json(serde_json::to_value(order).expect("order serializes")))
-        .map_err(ApiError::from_coffee)
+        .map_err(ApiError::from_coffee)?;
+    state
+        .inner
+        .audit
+        .record(AuditRecord::new("api.order.read", "ok").with_scope(
+            Some(claims.session_id),
+            Some(claims.skill_id),
+            Some(claims.user_did),
+        ));
+    Ok(Json(serde_json::to_value(order).expect("order serializes")))
 }
 
 async fn audit_records(State(state): State<DemoState>) -> Json<Value> {
     Json(json!({ "records": state.inner.audit.records() }))
 }
 
-fn authorize(state: &DemoState, headers: &HeaderMap) -> Result<TokenRecord, ApiError> {
+fn authorize(
+    state: &DemoState,
+    headers: &HeaderMap,
+    required_scope: &str,
+) -> Result<CapabilityTokenClaims, ApiError> {
     let authorization = headers
         .get(header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok());
+    let expected = ExpectedCapability::for_route(
+        state.inner.auth_config.merchant_did.clone(),
+        state.inner.auth_config.merchant_did.clone(),
+        state.inner.auth_config.merchant_did.clone(),
+        AGENT_ID,
+        required_scope,
+    );
     state
         .inner
         .auth
-        .verify_bearer(authorization)
+        .verify_bearer(&state.inner.auth_config, authorization, expected)
         .map_err(ApiError::from_auth)
 }
 
@@ -368,6 +391,11 @@ impl ApiError {
                 "expired_token",
                 "capability token is expired",
             ),
+            AuthError::InsufficientScope => (
+                StatusCode::FORBIDDEN,
+                "insufficient_scope",
+                "capability token does not include the required scope",
+            ),
             AuthError::UnknownChallenge => (
                 StatusCode::UNAUTHORIZED,
                 "unknown_challenge",
@@ -381,12 +409,22 @@ impl ApiError {
             AuthError::InvalidSignature => (
                 StatusCode::UNAUTHORIZED,
                 "invalid_signature",
-                "signedChallenge is missing a demo proof",
+                "signedChallenge signature is invalid",
+            ),
+            AuthError::UnknownDid => (
+                StatusCode::UNAUTHORIZED,
+                "unknown_did",
+                "DID document is unknown or invalid",
             ),
             AuthError::ScopeMismatch => (
                 StatusCode::UNAUTHORIZED,
                 "scope_mismatch",
-                "login scope does not match the issued challenge",
+                "auth scope does not match the issued challenge or token",
+            ),
+            AuthError::TokenIssuerUnavailable => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "token_issuer_unavailable",
+                "token issuer is not configured",
             ),
             AuthError::Unavailable => (
                 StatusCode::INTERNAL_SERVER_ERROR,

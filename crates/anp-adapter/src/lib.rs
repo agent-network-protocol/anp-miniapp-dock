@@ -25,6 +25,7 @@ pub use token::{
     bearer_token_expiry_ms, CapabilityToken, CapabilityTokenCache, CapabilityTokenClaims,
     CapabilityTokenError, CapabilityTokenIssueOutcome, CapabilityTokenIssuer,
     CapabilityTokenIssuerConfig, CapabilityTokenRequest, CapabilityTokenScope,
-    CapabilityTokenVerifier, CapabilityTokenVerifierConfig, ExpectedCapability, InMemoryTokenCache,
-    CAPABILITY_TOKEN_VERSION, DEFAULT_CAPABILITY_TOKEN_TTL_MS,
+    CapabilityTokenVerifier, CapabilityTokenVerifierConfig, ExpectedCapability,
+    ExpectedCapabilitySubject, InMemoryTokenCache, CAPABILITY_TOKEN_VERSION,
+    DEFAULT_CAPABILITY_TOKEN_TTL_MS,
 };

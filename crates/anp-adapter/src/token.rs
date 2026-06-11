@@ -204,11 +204,32 @@ pub struct ExpectedCapability {
     pub issuer: String,
     pub audience: String,
     pub merchant_did: String,
-    pub user_did: String,
+    pub user_did: Option<String>,
     pub agent_did: Option<String>,
     pub skill_id: String,
-    pub session_id: String,
+    pub session_id: Option<String>,
     pub required_scope: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExpectedCapabilitySubject {
+    pub user_did: String,
+    pub agent_did: Option<String>,
+    pub session_id: String,
+}
+
+impl ExpectedCapabilitySubject {
+    pub fn new(
+        user_did: impl Into<String>,
+        agent_did: Option<String>,
+        session_id: impl Into<String>,
+    ) -> Self {
+        Self {
+            user_did: user_did.into(),
+            agent_did,
+            session_id: session_id.into(),
+        }
+    }
 }
 
 impl ExpectedCapability {
@@ -216,20 +237,37 @@ impl ExpectedCapability {
         issuer: impl Into<String>,
         audience: impl Into<String>,
         merchant_did: impl Into<String>,
-        user_did: impl Into<String>,
-        agent_did: Option<String>,
+        subject: ExpectedCapabilitySubject,
         skill_id: impl Into<String>,
-        session_id: impl Into<String>,
         required_scope: impl Into<String>,
     ) -> Self {
         Self {
             issuer: issuer.into(),
             audience: audience.into(),
             merchant_did: merchant_did.into(),
-            user_did: user_did.into(),
-            agent_did,
+            user_did: Some(subject.user_did),
+            agent_did: subject.agent_did,
             skill_id: skill_id.into(),
-            session_id: session_id.into(),
+            session_id: Some(subject.session_id),
+            required_scope: required_scope.into(),
+        }
+    }
+
+    pub fn for_route(
+        issuer: impl Into<String>,
+        audience: impl Into<String>,
+        merchant_did: impl Into<String>,
+        skill_id: impl Into<String>,
+        required_scope: impl Into<String>,
+    ) -> Self {
+        Self {
+            issuer: issuer.into(),
+            audience: audience.into(),
+            merchant_did: merchant_did.into(),
+            user_did: None,
+            agent_did: None,
+            skill_id: skill_id.into(),
+            session_id: None,
             required_scope: required_scope.into(),
         }
     }
@@ -238,14 +276,20 @@ impl ExpectedCapability {
         if self.issuer.trim().is_empty()
             || self.audience.trim().is_empty()
             || self.merchant_did.trim().is_empty()
-            || self.user_did.trim().is_empty()
             || self.skill_id.trim().is_empty()
-            || self.session_id.trim().is_empty()
             || self.required_scope.trim().is_empty()
+            || self
+                .user_did
+                .as_deref()
+                .is_some_and(|did| did.trim().is_empty())
             || self
                 .agent_did
                 .as_deref()
                 .is_some_and(|did| did.trim().is_empty())
+            || self
+                .session_id
+                .as_deref()
+                .is_some_and(|session_id| session_id.trim().is_empty())
         {
             return Err(CapabilityTokenError::InvalidClaims);
         }
@@ -580,10 +624,22 @@ fn validate_expected_claims(
         || claims.aud != config.audience
         || claims.aud != expected.audience
         || claims.merchant_did != expected.merchant_did
-        || claims.user_did != expected.user_did
-        || claims.agent_did != expected.agent_did
         || claims.skill_id != expected.skill_id
-        || claims.session_id != expected.session_id
+    {
+        return Err(CapabilityTokenError::ScopeMismatch);
+    }
+    if expected
+        .user_did
+        .as_ref()
+        .is_some_and(|user_did| claims.user_did != *user_did)
+        || expected
+            .agent_did
+            .as_ref()
+            .is_some_and(|agent_did| claims.agent_did.as_ref() != Some(agent_did))
+        || expected
+            .session_id
+            .as_ref()
+            .is_some_and(|session_id| claims.session_id != *session_id)
     {
         return Err(CapabilityTokenError::ScopeMismatch);
     }
@@ -719,50 +775,60 @@ mod tests {
                 "did:wba:merchant.example",
                 "did:wba:merchant.example",
                 "did:wba:merchant-2.example",
-                "did:wba:user.example",
-                Some("did:wba:agent.example".to_owned()),
+                ExpectedCapabilitySubject::new(
+                    "did:wba:user.example",
+                    Some("did:wba:agent.example".to_owned()),
+                    "session-1",
+                ),
                 "coffee",
-                "session-1",
                 "coffee:drinks:read",
             ),
             ExpectedCapability::new(
                 "did:wba:merchant.example",
                 "did:wba:merchant.example",
                 "did:wba:merchant.example",
-                "did:wba:user-2.example",
-                Some("did:wba:agent.example".to_owned()),
+                ExpectedCapabilitySubject::new(
+                    "did:wba:user-2.example",
+                    Some("did:wba:agent.example".to_owned()),
+                    "session-1",
+                ),
                 "coffee",
-                "session-1",
                 "coffee:drinks:read",
             ),
             ExpectedCapability::new(
                 "did:wba:merchant.example",
                 "did:wba:merchant.example",
                 "did:wba:merchant.example",
-                "did:wba:user.example",
-                Some("did:wba:agent-2.example".to_owned()),
+                ExpectedCapabilitySubject::new(
+                    "did:wba:user.example",
+                    Some("did:wba:agent-2.example".to_owned()),
+                    "session-1",
+                ),
                 "coffee",
-                "session-1",
                 "coffee:drinks:read",
             ),
             ExpectedCapability::new(
                 "did:wba:merchant.example",
                 "did:wba:merchant.example",
                 "did:wba:merchant.example",
-                "did:wba:user.example",
-                Some("did:wba:agent.example".to_owned()),
+                ExpectedCapabilitySubject::new(
+                    "did:wba:user.example",
+                    Some("did:wba:agent.example".to_owned()),
+                    "session-1",
+                ),
                 "tea",
-                "session-1",
                 "coffee:drinks:read",
             ),
             ExpectedCapability::new(
                 "did:wba:merchant.example",
                 "did:wba:merchant.example",
                 "did:wba:merchant.example",
-                "did:wba:user.example",
-                Some("did:wba:agent.example".to_owned()),
+                ExpectedCapabilitySubject::new(
+                    "did:wba:user.example",
+                    Some("did:wba:agent.example".to_owned()),
+                    "session-2",
+                ),
                 "coffee",
-                "session-2",
                 "coffee:drinks:read",
             ),
         ] {
@@ -785,20 +851,24 @@ mod tests {
                 "did:wba:issuer-2.example",
                 "did:wba:merchant.example",
                 "did:wba:merchant.example",
-                "did:wba:user.example",
-                Some("did:wba:agent.example".to_owned()),
+                ExpectedCapabilitySubject::new(
+                    "did:wba:user.example",
+                    Some("did:wba:agent.example".to_owned()),
+                    "session-1",
+                ),
                 "coffee",
-                "session-1",
                 "coffee:drinks:read",
             ),
             ExpectedCapability::new(
                 "did:wba:merchant.example",
                 "did:wba:audience-2.example",
                 "did:wba:merchant.example",
-                "did:wba:user.example",
-                Some("did:wba:agent.example".to_owned()),
+                ExpectedCapabilitySubject::new(
+                    "did:wba:user.example",
+                    Some("did:wba:agent.example".to_owned()),
+                    "session-1",
+                ),
                 "coffee",
-                "session-1",
                 "coffee:drinks:read",
             ),
         ] {
@@ -826,6 +896,29 @@ mod tests {
             .expect_err("missing scope fails");
 
         assert_eq!(error, CapabilityTokenError::MissingScope);
+    }
+
+    #[test]
+    fn capability_token_route_expected_scope_allows_claim_bound_subject() {
+        let issuer = issuer();
+        let verifier = verifier();
+        let outcome = issuer
+            .issue_at(request(), 1_780_000_000_000)
+            .expect("token issues");
+        let expected = ExpectedCapability::for_route(
+            "did:wba:merchant.example",
+            "did:wba:merchant.example",
+            "did:wba:merchant.example",
+            "coffee",
+            "coffee:drinks:read",
+        );
+
+        let claims = verifier
+            .verify_at(&outcome.token.value, &expected, 1_780_000_001_000)
+            .expect("route scope verifies");
+
+        assert_eq!(claims.user_did, "did:wba:user.example");
+        assert_eq!(claims.session_id, "session-1");
     }
 
     #[test]
@@ -946,10 +1039,12 @@ mod tests {
             "did:wba:merchant.example",
             "did:wba:merchant.example",
             "did:wba:merchant.example",
-            "did:wba:user.example",
-            Some("did:wba:agent.example".to_owned()),
+            ExpectedCapabilitySubject::new(
+                "did:wba:user.example",
+                Some("did:wba:agent.example".to_owned()),
+                "session-1",
+            ),
             "coffee",
-            "session-1",
             required_scope,
         )
     }

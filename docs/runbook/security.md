@@ -17,13 +17,13 @@ Implemented boundaries:
 - High-risk APIs such as order confirmation and payment require consent before execution.
 - Audit records and proofs use redacted parameter summaries.
 - ANP adapter request policy denies by default unless the URL authority is allowlisted.
-- Capability tokens are scoped by merchant DID, user DID, and Skill ID.
+- Capability tokens are scoped by merchant DID, user DID, agent DID, Skill ID, session ID, and route scope.
 
 ## DID And Token Handling
 
 Runtime and adapter layers own DID signing, challenge/login contracts, signed HTTP, and capability token cache behavior. Skill code and CLI output must not expose DID private keys, raw capability tokens, HTTP signatures, or bearer values.
 
-The demo server issues short-lived mock capability tokens after challenge/login. `dock-cli run-demo` uses the token internally for demo-server business checks but prints only:
+The demo server verifies ANP DID challenge proofs and issues short-lived scoped capability tokens after challenge/login. `dock-cli run-demo` uses the token internally for demo-server business checks but prints only:
 
 ```json
 {
@@ -63,7 +63,7 @@ rg -n "capabilityToken|Authorization|Signature|private_key|private key|secret|to
 Expected hits include:
 
 - redaction code and tests,
-- mock-only fixture warnings,
+- fixture warnings,
 - security documentation,
 - internal token handling code.
 
@@ -72,7 +72,7 @@ Unexpected hits include raw bearer values, real DID credential paths, private ke
 ## Demo Limitations
 
 - The coffee Skill and demo server use mock data only.
-- Demo challenge proof is `demo-signature`; it is not a production DID proof.
+- Demo challenge proof uses ANP HTTP signatures over a typed challenge payload; `demo-signature` must not be accepted.
 - Mock payment does not integrate a real payment provider.
 - The CLI mock-approves consent for E2E verification. Production hosts must connect consent to a human authorization UI or policy engine.
 - The Rust MVP outputs Render IR JSON and CardSpec fallback; production host rendering is a separate adapter concern.

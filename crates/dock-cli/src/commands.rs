@@ -1,6 +1,8 @@
+use anp::authentication::AuthMode;
 use anp_adapter::{
-    ChallengeLoginRequest, ChallengeLoginResponse, DidChallenge, DidCredentialConfig,
-    DidCredentialError,
+    sign_challenge_proof, ChallengeLoginRequest, ChallengeLoginResponse, ChallengeProofError,
+    ChallengeProofPayload, DidChallenge as AdapterDidChallenge, DidCredentialConfig,
+    DidCredentialError, FileDidCredentialProvider, IdentitySession,
 };
 use card_spec::{fallback_from_result, FallbackReason};
 use clap::{Parser, Subcommand};
@@ -16,7 +18,7 @@ use dock_core::{
 };
 use js_runtime_quickjs::ApiVm;
 use mcp_schema::{AtomicApiResult, ValidationReport};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
 use skill_loader::{load_skill, resolve_component_path, LoadedSkill};
 use std::cell::RefCell;
@@ -173,6 +175,9 @@ pub enum CliError {
 
     #[error("DID credential configuration failed: {0}")]
     Credential(#[from] DidCredentialError),
+
+    #[error("DID challenge proof failed: {0}")]
+    ChallengeProof(#[from] ChallengeProofError),
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -475,7 +480,8 @@ fn run_demo(
     server: &str,
     auth_config: Option<&DemoAuthConfig>,
 ) -> Result<Value, CliError> {
-    let auth = DemoHttpClient::new(server).login()?;
+    let auth_config = auth_config.ok_or(DidCredentialError::Unavailable)?;
+    let auth = DemoHttpClient::new(server).login(auth_config)?;
     let server_business =
         DemoHttpClient::new(server).coffee_business_check(&auth.capability_token)?;
     let runtime = RuntimeHarness::load(skill_path)?;
@@ -528,7 +534,7 @@ fn run_demo(
                 "merchantDid": auth.merchant_did,
                 "capabilityToken": "[REDACTED]",
                 "tokenReceived": auth.token_received,
-                "credential": auth_config.map(DemoAuthConfig::redacted_summary)
+                "credential": auth_config.redacted_summary()
             },
             "business": server_business
         },
@@ -819,6 +825,17 @@ struct DemoAuth {
     token_received: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DemoDidChallenge {
+    challenge_id: String,
+    merchant_did: String,
+    nonce: String,
+    issued_at_ms: u64,
+    expires_at_ms: Option<u64>,
+    audience: String,
+}
+
 struct DemoHttpClient {
     base_url: String,
 }
@@ -830,32 +847,52 @@ impl DemoHttpClient {
         }
     }
 
-    fn login(&self) -> Result<DemoAuth, CliError> {
-        let challenge: DidChallenge = serde_json::from_value(self.post_json(
+    fn login(&self, auth_config: &DemoAuthConfig) -> Result<DemoAuth, CliError> {
+        let challenge: DemoDidChallenge = serde_json::from_value(self.post_json(
             "/agents/coffee/auth/challenge",
             None,
             json!({
                 "sessionId": DEFAULT_SESSION_ID,
                 "skillId": DEFAULT_SKILL_ID,
-                "userDid": DEFAULT_USER_DID,
-                "agentDid": DEFAULT_AGENT_DID
+                "userDid": auth_config.user_did,
+                "agentDid": auth_config.agent_did
             }),
         )?)
         .map_err(|source| CliError::Json {
             label: "auth challenge response".to_owned(),
             source,
         })?;
+        let session = IdentitySession::new(
+            auth_config.user_did.clone(),
+            auth_config.agent_did.clone(),
+            challenge.merchant_did.clone(),
+            DEFAULT_SKILL_ID,
+            DEFAULT_SESSION_ID,
+        );
+        let payload = ChallengeProofPayload::from_challenge(
+            &AdapterDidChallenge {
+                challenge_id: challenge.challenge_id.clone(),
+                merchant_did: challenge.merchant_did.clone(),
+                nonce: challenge.nonce.clone(),
+                expires_at_ms: challenge.expires_at_ms,
+            },
+            &session,
+            challenge.audience.clone(),
+            challenge.issued_at_ms,
+        );
+        let provider = FileDidCredentialProvider::from_config(auth_config.credential.clone())?;
+        let proof = sign_challenge_proof(&payload, &provider, &session, AuthMode::HttpSignatures)?;
         let login_request = ChallengeLoginRequest {
             session_id: DEFAULT_SESSION_ID.to_owned(),
             skill_id: DEFAULT_SKILL_ID.to_owned(),
-            user_did: DEFAULT_USER_DID.to_owned(),
-            agent_did: Some(DEFAULT_AGENT_DID.to_owned()),
+            user_did: auth_config.user_did.clone(),
+            agent_did: auth_config.agent_did.clone(),
             merchant_did: challenge.merchant_did.clone(),
             challenge_id: challenge.challenge_id,
-            signed_challenge: json!({
-                "proof": "demo-signature",
-                "nonce": challenge.nonce
-            }),
+            signed_challenge: serde_json::to_value(proof).map_err(|source| CliError::Json {
+                label: "signedChallenge".to_owned(),
+                source,
+            })?,
         };
         let login: ChallengeLoginResponse = serde_json::from_value(self.post_json(
             "/agents/coffee/auth/login",

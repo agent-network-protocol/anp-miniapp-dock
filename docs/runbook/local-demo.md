@@ -6,7 +6,7 @@ This runbook describes how to run the Rust MVP locally with the mock coffee Skil
 
 - Rust toolchain `1.88.0`; the repository pins it with `rust-toolchain.toml`.
 - Network access for the first Cargo dependency fetch.
-- No real DID credentials, merchant secrets, capability tokens, or user data are required. The coffee demo uses mock-only identities and proof payloads.
+- A local test DID identity is required for challenge signing. Use a non-production fixture identity and keep its private key outside the repository.
 
 ## Verify The Workspace
 
@@ -31,7 +31,12 @@ cargo test -p demo-server
 Use port `3000` for a stable local URL:
 
 ```bash
-cargo run -p demo-server -- --host 127.0.0.1 --port 3000 --skill examples/coffee-skill
+cargo run -p demo-server -- \
+  --host 127.0.0.1 \
+  --port 3000 \
+  --skill examples/coffee-skill \
+  --token-issuer-secret test-only-local-secret \
+  --trusted-did-document <user-did>=/path/to/identity/did_document.json
 ```
 
 The server exposes:
@@ -77,12 +82,16 @@ cargo run -p dock-cli -- preview-card '{"content":[{"type":"text","text":"paid"}
 Run the coffee flow against the server:
 
 ```bash
-cargo run -p dock-cli -- run-demo --skill examples/coffee-skill --server http://127.0.0.1:3000
+cargo run -p dock-cli -- run-demo \
+  --skill examples/coffee-skill \
+  --server http://127.0.0.1:3000 \
+  --identity-handle miniapp-test.awiki.ai \
+  --identity-root /path/to/identity-store/identities
 ```
 
 `run-demo` performs:
 
-1. Demo challenge/login against `demo-server`.
+1. ANP DID challenge/login against `demo-server`.
 2. Demo-server coffee API checks for drinks, order confirmation, and mock payment.
 3. Local Skill API execution through `dock-core` and the QuickJS API VM.
 4. Component VM rendering for `drink-list`, `order-confirm`, and `payment-result`.
@@ -97,7 +106,11 @@ CLI output is JSON. Capability tokens are used internally and are printed only a
 For automated checks, start `demo-server` with `--port 0`, read the printed `listening on` URL, and pass it to `dock-cli run-demo`.
 
 ```bash
-cargo run -p demo-server -- --port 0 --skill examples/coffee-skill
+cargo run -p demo-server -- \
+  --port 0 \
+  --skill examples/coffee-skill \
+  --token-issuer-secret test-only-local-secret \
+  --trusted-did-document <user-did>=/path/to/identity/did_document.json
 ```
 
 This avoids port conflicts in CI-like local runs.

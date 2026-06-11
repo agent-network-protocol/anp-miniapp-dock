@@ -62,11 +62,21 @@ cargo run -p dock-cli -- preview-card '{"content":[{"type":"text","text":"paid"}
 To run the coffee flow against the local demo server:
 
 ```bash
-cargo run -p demo-server -- --host 127.0.0.1 --port 3000 --skill examples/coffee-skill
-cargo run -p dock-cli -- run-demo --skill examples/coffee-skill --server http://127.0.0.1:3000
+cargo run -p demo-server -- \
+  --host 127.0.0.1 \
+  --port 3000 \
+  --skill examples/coffee-skill \
+  --token-issuer-secret test-only-local-secret \
+  --trusted-did-document did:wba:miniapp-test.example=/path/to/identity/did_document.json
+
+cargo run -p dock-cli -- run-demo \
+  --skill examples/coffee-skill \
+  --server http://127.0.0.1:3000 \
+  --identity-handle miniapp-test.awiki.ai \
+  --identity-root /path/to/identity-store/identities
 ```
 
-`run-demo` performs demo challenge/login, exercises demo-server coffee business APIs, runs the local Skill API VM through `dock-core`, triggers component `api/call` actions, mock-approves high-risk consent, renders Component VM output to Render IR JSON, and verifies card expiration. Capability tokens are used internally and redacted from CLI output.
+`run-demo` performs ANP DID challenge/login, exercises demo-server coffee business APIs, runs the local Skill API VM through `dock-core`, triggers component `api/call` actions, mock-approves high-risk consent, renders Component VM output to Render IR JSON, and verifies card expiration. Capability tokens are used internally and redacted from CLI output. The command above references a local test identity by path; do not copy or commit private keys into this repository. The DID passed to `--trusted-did-document` must match the `did` field in that identity's `identity.json`.
 
 ## MVP Boundary
 
