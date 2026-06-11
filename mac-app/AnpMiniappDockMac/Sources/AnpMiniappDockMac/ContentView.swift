@@ -257,6 +257,14 @@ private struct DrinkListInteractiveCard: View {
                     .foregroundStyle(.secondary)
 
                 VStack(spacing: 10) {
+                    if model.drinks.isEmpty {
+                        Text("当前没有可选择的饮品，请重新输入咖啡需求。")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .padding(12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    }
                     ForEach(model.drinks) { drink in
                         HStack(spacing: 12) {
                             VStack(alignment: .leading, spacing: 3) {
@@ -518,8 +526,11 @@ private struct FlowCardsView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Skill 返回组件")
+            Text("自动演示回放（只读）")
                 .font(.title2.bold())
+            Text("这里是 `dock-cli run-demo` 一次性跑完后的结果回放，不是可点击卡片。真实交互流程会先显示“选择咖啡”按钮，再显示“支付”按钮。")
+                .font(.callout)
+                .foregroundStyle(.secondary)
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 14)], alignment: .leading, spacing: 14) {
                 ForEach(steps) { step in
                     MiniAppStepCard(step: step)

@@ -309,41 +309,53 @@ final class CoffeeInteractiveRuntime: @unchecked Sendable {
 
     func searchDrinks(query: String) async throws -> CoffeeDrinkListCard {
         try await runOnWorker {
-            let output = try self.callAPI(
-                name: "searchDrinks",
-                arguments: [
-                    "query": query,
-                    "serverUrl": self.server.url
-                ]
-            )
-            return try Self.parseDrinkList(output)
+            try self.searchDrinksSync(query: query)
         }
     }
 
     func confirmOrder(drinkId: String) async throws -> CoffeeOrderCard {
         try await runOnWorker {
-            let output = try self.callAPI(
-                name: "confirmOrder",
-                arguments: [
-                    "drinkId": drinkId,
-                    "remoteBaseUrl": self.server.url
-                ]
-            )
-            return try Self.parseOrder(output)
+            try self.confirmOrderSync(drinkId: drinkId)
         }
     }
 
     func payOrder(orderId: String) async throws -> CoffeePaymentCard {
         try await runOnWorker {
-            let output = try self.callAPI(
-                name: "payOrder",
-                arguments: [
-                    "orderId": orderId,
-                    "remoteBaseUrl": self.server.url
-                ]
-            )
-            return try Self.parsePayment(output)
+            try self.payOrderSync(orderId: orderId)
         }
+    }
+
+    func searchDrinksSync(query: String) throws -> CoffeeDrinkListCard {
+        let output = try callAPI(
+            name: "searchDrinks",
+            arguments: [
+                "query": query,
+                "serverUrl": server.url
+            ]
+        )
+        return try Self.parseDrinkList(output)
+    }
+
+    func confirmOrderSync(drinkId: String) throws -> CoffeeOrderCard {
+        let output = try callAPI(
+            name: "confirmOrder",
+            arguments: [
+                "drinkId": drinkId,
+                "remoteBaseUrl": server.url
+            ]
+        )
+        return try Self.parseOrder(output)
+    }
+
+    func payOrderSync(orderId: String) throws -> CoffeePaymentCard {
+        let output = try callAPI(
+            name: "payOrder",
+            arguments: [
+                "orderId": orderId,
+                "remoteBaseUrl": server.url
+            ]
+        )
+        return try Self.parsePayment(output)
     }
 
     private func runOnWorker<T>(_ work: @escaping () throws -> T) async throws -> T {
