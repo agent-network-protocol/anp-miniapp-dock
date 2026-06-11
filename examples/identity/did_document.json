@@ -1,0 +1,69 @@
+{
+  "@context": [
+    "https://www.w3.org/ns/did/v1",
+    "https://w3id.org/security/data-integrity/v2",
+    "https://w3id.org/security/multikey/v1",
+    "https://w3id.org/security/suites/x25519-2019/v1"
+  ],
+  "assertionMethod": [
+    "did:wba:awiki.ai:miniapp-test:e1_W7dGd8y5C1Fy17qGAj_aXnONyW4lr1emj_ym4UBDiNk#key-1"
+  ],
+  "authentication": [
+    "did:wba:awiki.ai:miniapp-test:e1_W7dGd8y5C1Fy17qGAj_aXnONyW4lr1emj_ym4UBDiNk#key-1"
+  ],
+  "id": "did:wba:awiki.ai:miniapp-test:e1_W7dGd8y5C1Fy17qGAj_aXnONyW4lr1emj_ym4UBDiNk",
+  "keyAgreement": [
+    "did:wba:awiki.ai:miniapp-test:e1_W7dGd8y5C1Fy17qGAj_aXnONyW4lr1emj_ym4UBDiNk#key-3"
+  ],
+  "proof": {
+    "challenge": "6b0a971e5153e42a38b1bd8b875eb243",
+    "created": "2026-06-11T01:52:06Z",
+    "cryptosuite": "eddsa-jcs-2022",
+    "domain": "awiki.ai",
+    "proofPurpose": "assertionMethod",
+    "proofValue": "jhLuK7TeqJc57wYQYqKU2NR5-oFd2gB2OP6_1l-5O--5A0SikULi_Wa38HTsu2KLRLtKcGRjHb5uoWamBxGECw",
+    "type": "DataIntegrityProof",
+    "verificationMethod": "did:wba:awiki.ai:miniapp-test:e1_W7dGd8y5C1Fy17qGAj_aXnONyW4lr1emj_ym4UBDiNk#key-1"
+  },
+  "service": [
+    {
+      "id": "did:wba:awiki.ai:miniapp-test:e1_W7dGd8y5C1Fy17qGAj_aXnONyW4lr1emj_ym4UBDiNk#message",
+      "profiles": [
+        "anp.core.binding.v1",
+        "anp.direct.base.v1",
+        "anp.attachment.v1"
+      ],
+      "securityProfiles": [
+        "transport-protected"
+      ],
+      "serviceDid": "did:wba:awiki.ai",
+      "serviceEndpoint": "https://awiki.ai/anp-im/rpc",
+      "type": "ANPMessageService"
+    }
+  ],
+  "verificationMethod": [
+    {
+      "controller": "did:wba:awiki.ai:miniapp-test:e1_W7dGd8y5C1Fy17qGAj_aXnONyW4lr1emj_ym4UBDiNk",
+      "id": "did:wba:awiki.ai:miniapp-test:e1_W7dGd8y5C1Fy17qGAj_aXnONyW4lr1emj_ym4UBDiNk#key-1",
+      "publicKeyMultibase": "z6Mkt8G4bYz4B7HUwonNoaHjReAkc6sBzgPNCUDJ7j4ainFq",
+      "type": "Multikey"
+    },
+    {
+      "controller": "did:wba:awiki.ai:miniapp-test:e1_W7dGd8y5C1Fy17qGAj_aXnONyW4lr1emj_ym4UBDiNk",
+      "id": "did:wba:awiki.ai:miniapp-test:e1_W7dGd8y5C1Fy17qGAj_aXnONyW4lr1emj_ym4UBDiNk#key-2",
+      "publicKeyJwk": {
+        "crv": "P-256",
+        "kty": "EC",
+        "x": "ReKBt4zJLTqbDTjqcY9adQwXhG-_dyi4XThUp-HTBDo",
+        "y": "J0_KM3IErRDcNmvC-NydK-ZILB2cswPju9DbCkMCXTI"
+      },
+      "type": "EcdsaSecp256r1VerificationKey2019"
+    },
+    {
+      "controller": "did:wba:awiki.ai:miniapp-test:e1_W7dGd8y5C1Fy17qGAj_aXnONyW4lr1emj_ym4UBDiNk",
+      "id": "did:wba:awiki.ai:miniapp-test:e1_W7dGd8y5C1Fy17qGAj_aXnONyW4lr1emj_ym4UBDiNk#key-3",
+      "publicKeyMultibase": "z6LSeRu326RXBtbAVjdFkQy6a24vkv1j96Ng2P8eZfiaMe3w",
+      "type": "X25519KeyAgreementKey2019"
+    }
+  ]
+}
