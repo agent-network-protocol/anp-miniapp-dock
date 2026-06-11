@@ -1,0 +1,9 @@
+fastapi>=0.111,<1
+uvicorn[standard]>=0.30,<1
+pydantic>=2,<3
+# Preferred SDK for future stable DID-WBA verification APIs; the demo keeps a
+# Rust-compatible local verifier in auth.py so the service still imports if this
+# package is not installed yet.
+anp>=0.8.7
+# Required by auth.py for real Ed25519 verification of DockDidChallengeProof.
+cryptography>=42,<46

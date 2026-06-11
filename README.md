@@ -28,6 +28,8 @@ The MVP is now implemented as a Cargo workspace. It can load a MiniApp MCP-style
 - `crates/demo-server`: coffee merchant Agent demo server.
 - `crates/dock-cli`: developer CLI and coffee E2E harness.
 - `examples/coffee-skill`: mock MiniApp MCP coffee Skill fixture.
+- `examples/coffee-fastapi-server`: Python/FastAPI localhost coffee service used to simulate a remote HTTP merchant.
+- `mac-app/AnpMiniappDockMac`: SwiftUI/Xcode chatbot host that recognizes user intent, calls the local MiniApp container, and renders Skill components.
 
 ## Development Commands
 
@@ -59,7 +61,19 @@ cargo run -p dock-cli -- preview-component examples/coffee-skill components/drin
 cargo run -p dock-cli -- preview-card '{"content":[{"type":"text","text":"paid"}],"structuredContent":{"orderId":"order_demo_001","status":"paid"}}'
 ```
 
-To run the coffee flow against the local demo server:
+To run the coffee flow against the Python/FastAPI localhost service:
+
+```bash
+cd examples/coffee-fastapi-server
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn app:app --host 127.0.0.1 --port 8008
+# in another shell from the repo root:
+cargo run -p dock-cli -- run-demo --skill examples/coffee-skill --server http://127.0.0.1:8008
+```
+
+The Rust demo server remains available for focused tests:
 
 ```bash
 cargo run -p demo-server -- \
@@ -74,7 +88,37 @@ cargo run -p dock-cli -- run-demo \
   --server http://127.0.0.1:3000
 ```
 
-`run-demo` performs ANP DID challenge/login, exercises demo-server coffee business APIs, runs the local Skill API VM through `dock-core`, triggers component `api/call` actions, mock-approves high-risk consent, renders Component VM output to Render IR JSON, and verifies card expiration. Capability tokens are used internally and redacted from CLI output. By default, the CLI reads `examples/identity/did_document.json` and `examples/identity/key-1-private.pem`, deriving the user DID from the DID document `id`. These files must stay local and ignored by Git. The DID passed to `--trusted-did-document` must match the DID document `id`.
+`run-demo` performs ANP DID challenge/login, exercises demo-server coffee business APIs, runs the local Skill API VM through `dock-core`, lets the Skill JavaScript call `wx.login` and `wx.request` to the localhost coffee HTTP service, triggers component `api/call` actions, mock-approves high-risk consent, renders Component VM output to Render IR JSON, and verifies card expiration. Capability tokens are used internally and redacted from CLI output. By default, the CLI reads `examples/identity/did_document.json` and `examples/identity/key-1-private.pem`, deriving the user DID from the DID document `id`. Those files are test fixtures only; real DID credentials must stay local and ignored by Git. The DID passed to `--trusted-did-document` must match the DID document `id`.
+
+## Mac Chatbot Demo
+
+The Mac host is a real Xcode project and Swift Package. It provides a PC-style chatbot UI:
+
+1. the user enters a need such as `我要点一杯咖啡`;
+2. the app reads `OPENAI_BASE_URL`, `OPENAI_API_KEY`, and `OPENAI_MODEL` from the process environment or `source ~/.zshrc`;
+3. an OpenAI-compatible chat-completions call recognizes the coffee-order intent;
+4. the app calls the local MiniApp container / Coffee Skill and renders returned components in the chat.
+
+Prepare the optional FastAPI localhost service first if you want the app to use it instead of the Rust fallback server:
+
+```bash
+cd examples/coffee-fastapi-server
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+Run the host:
+
+```bash
+open mac-app/AnpMiniappDockMac/AnpMiniappDockMac.xcodeproj
+
+# or smoke test without opening a window:
+cd mac-app/AnpMiniappDockMac
+ANP_DOCK_MAC_HEADLESS=1 ANP_DOCK_CHAT_PROMPT='我要点一杯咖啡' swift run
+```
+
+Set `ANP_DOCK_DISABLE_OPENAI=1` to force local fallback intent recognition for deterministic smoke tests.
 
 ## MVP Boundary
 
@@ -94,4 +138,4 @@ P0.5 auth/token now uses real ANP DID challenge signing and scoped capability to
 
 ## Security Notes
 
-Do not commit private keys, DID credentials, capability tokens, merchant secrets, or real user data. The coffee Skill and demo server use mock-only business data, but challenge/login and capability tokens are no longer mock. Runtime code should keep DID signing, tokens, and high-risk authorization below the Skill/CLI boundary, and user-facing output should redact tokens and signatures.
+Do not commit private keys, DID credentials, capability tokens, merchant secrets, OpenAI API keys, or real user data. The coffee Skill and demo server use mock-only business data, but challenge/login and capability tokens are no longer mock. Runtime code should keep DID signing, tokens, and high-risk authorization below the Skill/CLI boundary, and user-facing output should redact tokens and signatures.

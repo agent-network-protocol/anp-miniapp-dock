@@ -16,7 +16,7 @@ use dock_core::{
     DockCoreError, ErrorCode, Orchestrator, PermissionDecision, RenderOutcome, RenderRouter,
     RuntimeHost,
 };
-use js_runtime_quickjs::ApiVm;
+use js_runtime_quickjs::{ApiVm, HostDidAuthConfig};
 use mcp_schema::{AtomicApiResult, ValidationReport};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Map, Value};
@@ -287,7 +287,8 @@ impl DemoAuthConfig {
             Some(user_did) => user_did,
             None => did_from_document_path(&did_document)?,
         };
-        let credential = DidCredentialConfig::new(did_document, private_key);
+        let credential = DidCredentialConfig::new(did_document, private_key)
+            .without_private_key_permission_check();
         credential.validate()?;
         Ok(Self {
             user_did,
@@ -472,7 +473,20 @@ fn validate(skill_path: &Path) -> Result<Value, CliError> {
 
 fn call_api(skill_path: &Path, api_name: &str, json_args: &str) -> Result<Value, CliError> {
     let args = parse_json(json_args, "jsonArgs")?;
-    let runtime = RuntimeHarness::load(skill_path, RuntimeIdentity::default_demo())?;
+    let auth_config = if requires_remote_auth(&args) {
+        DemoAuthConfig::from_inputs_optional(None, None, None, None, None, None, EnvConfigSource)?
+    } else {
+        None
+    };
+    let identity = auth_config
+        .as_ref()
+        .map(|auth_config| RuntimeIdentity {
+            user_did: auth_config.user_did.clone(),
+            agent_did: auth_config.agent_did.clone(),
+            merchant_did: DEFAULT_MERCHANT_DID.to_owned(),
+        })
+        .unwrap_or_else(RuntimeIdentity::default_demo);
+    let runtime = RuntimeHarness::load(skill_path, identity, auth_config.as_ref())?;
     let outcome = runtime.call(api_name, args)?;
     Ok(json!({
         "status": "ok",
@@ -482,6 +496,13 @@ fn call_api(skill_path: &Path, api_name: &str, json_args: &str) -> Result<Value,
         "render": render_outcome_json(outcome.render.as_ref()),
         "audit": audit_events_json(&runtime.audit_events())
     }))
+}
+
+fn requires_remote_auth(args: &Value) -> bool {
+    args.get("serverUrl")
+        .or_else(|| args.get("remoteBaseUrl"))
+        .and_then(Value::as_str)
+        .is_some_and(|url| !url.trim().is_empty())
 }
 
 fn preview_component(
@@ -540,13 +561,15 @@ fn run_demo(
             agent_did: auth_config.agent_did.clone(),
             merchant_did: auth.merchant_did.clone(),
         },
+        Some(auth_config),
     )?;
 
-    let search = runtime.call("searchDrinks", json!({"query": "latte"}))?;
+    let search_args = json!({"query": "latte", "serverUrl": server.trim_end_matches('/')});
+    let search = runtime.call("searchDrinks", search_args.clone())?;
     let mut drink_component = mount_for_outcome(
         skill_path,
         "searchDrinks",
-        json!({"query": "latte"}),
+        search_args,
         search.result.clone(),
         required_component_path(&search, "searchDrinks")?,
     )?;
@@ -588,8 +611,20 @@ fn run_demo(
             "health": server_health,
             "auth": {
                 "merchantDid": auth.merchant_did,
+                "userDid": auth_config.user_did,
+                "agentDid": auth_config.agent_did,
                 "capabilityToken": "[REDACTED]",
                 "tokenReceived": auth.token_received,
+                "authProvider": "did-challenge",
+                "challengeVerified": auth.token_received,
+                "tokenScopes": [
+                    "coffee:drinks:read",
+                    "coffee:order:confirm",
+                    "coffee:order:pay",
+                    "coffee:order:read"
+                ],
+                "wxLoginStatus": "container-managed",
+                "requestAuthMode": "container-attached-bearer",
                 "credential": auth_config.redacted_summary()
             },
             "business": server_business
@@ -643,15 +678,29 @@ impl RuntimeIdentity {
 }
 
 impl RuntimeHarness {
-    fn load(skill_path: &Path, identity: RuntimeIdentity) -> Result<Self, CliError> {
+    fn load(
+        skill_path: &Path,
+        identity: RuntimeIdentity,
+        auth_config: Option<&DemoAuthConfig>,
+    ) -> Result<Self, CliError> {
         let skill = load_skill(skill_path)?;
         let api_vm = ApiVm::load_skill(skill.clone())?;
+        let mut executor = api_vm.executor();
+        if let Some(auth_config) = auth_config {
+            executor = executor.with_host_did_auth(
+                HostDidAuthConfig::new(
+                    auth_config.credential.did_document_path.clone(),
+                    auth_config.credential.private_key_path.clone(),
+                )
+                .without_private_key_permission_check(),
+            );
+        }
         let audit = CollectAudit::default();
         let orchestrator = Orchestrator::load_skill(
             skill.clone(),
             AllowHost,
             ApproveConsent,
-            api_vm.executor(),
+            executor,
             ComponentRenderRouter {
                 skill_root: skill.root,
             },

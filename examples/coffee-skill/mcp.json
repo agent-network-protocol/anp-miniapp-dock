@@ -9,7 +9,12 @@
         },
         "anp": {
           "risk": "low"
-        }
+        },
+        "remoteLogin": "wx.login+did-challenge",
+        "compatLoginEndpoint": "/api/login",
+        "authBoundary": "container-managed",
+        "tokenVisibleToSkill": false,
+        "requestAuthMode": "host-managed-bearer"
       },
       "inputSchema": {
         "type": "object",
@@ -39,7 +44,12 @@
         },
         "anp": {
           "risk": "order"
-        }
+        },
+        "remoteLogin": "wx.login+did-challenge",
+        "compatLoginEndpoint": "/api/login",
+        "authBoundary": "container-managed",
+        "tokenVisibleToSkill": false,
+        "requestAuthMode": "host-managed-bearer"
       },
       "inputSchema": {
         "type": "object",
@@ -82,7 +92,12 @@
         },
         "anp": {
           "risk": "payment"
-        }
+        },
+        "remoteLogin": "wx.login+did-challenge",
+        "compatLoginEndpoint": "/api/login",
+        "authBoundary": "container-managed",
+        "tokenVisibleToSkill": false,
+        "requestAuthMode": "host-managed-bearer"
       },
       "inputSchema": {
         "type": "object",

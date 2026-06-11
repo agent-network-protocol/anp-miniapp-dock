@@ -17,6 +17,12 @@ use std::sync::{Arc, Mutex};
 const TOKEN_TTL_MS: u64 = 15 * 60 * 1000;
 const CHALLENGE_TTL_MS: u64 = 5 * 60 * 1000;
 const LOGIN_AUDIENCE_PATH: &str = "/agents/coffee/auth/login";
+const COFFEE_DEMO_SCOPES: [&str; 4] = [
+    "coffee:drinks:read",
+    "coffee:order:confirm",
+    "coffee:order:pay",
+    "coffee:order:read",
+];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ServerAuthConfig {
@@ -85,6 +91,30 @@ impl ServerAuthConfig {
             token_issuer.secret.clone(),
         ))
         .map_err(map_token_error)
+    }
+
+    pub fn issue_localhost_login_token(
+        &self,
+        session_id: impl Into<String>,
+        skill_id: impl Into<String>,
+        user_did: impl Into<String>,
+        agent_did: Option<String>,
+    ) -> Result<ChallengeLoginResponse, AuthError> {
+        let outcome = self
+            .token_issuer()?
+            .issue(CapabilityTokenRequest::new(
+                self.merchant_did.clone(),
+                user_did.into(),
+                agent_did,
+                skill_id.into(),
+                session_id.into(),
+                COFFEE_DEMO_SCOPES,
+            ))
+            .map_err(map_token_error)?;
+        Ok(ChallengeLoginResponse {
+            capability_token: outcome.token.value,
+            expires_at_ms: outcome.token.expires_at_ms,
+        })
     }
 
     fn resolve_trusted_did_document(&self, did: &str) -> Result<Value, AuthError> {
@@ -288,12 +318,7 @@ impl AuthStore {
                 request.agent_did,
                 request.skill_id,
                 request.session_id,
-                [
-                    "coffee:drinks:read",
-                    "coffee:order:confirm",
-                    "coffee:order:pay",
-                    "coffee:order:read",
-                ],
+                COFFEE_DEMO_SCOPES,
             ))
             .map_err(map_token_error)?;
         Ok(ChallengeLoginResponse {

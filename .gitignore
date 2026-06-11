@@ -19,3 +19,13 @@ target
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #.idea/
+
+# Swift Package / macOS app generated output
+mac-app/**/.build/
+mac-app/**/.swiftpm/
+mac-app/**/*.xcuserdata/
+mac-app/**/.xcode-derived/
+
+# Python demo server artifacts
+examples/coffee-fastapi-server/.venv/
+examples/coffee-fastapi-server/__pycache__/

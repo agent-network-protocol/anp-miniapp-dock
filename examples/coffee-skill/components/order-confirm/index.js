@@ -7,10 +7,12 @@ Component({
       const modelCtx = wx.modelContext.getContext(this)
       modelCtx.on(wx.modelContext.NotificationType.Result, (data) => {
         const result = data.result.structuredContent
+        const meta = data.result._meta || {}
         this.setData({
           orderId: result.orderId,
           drinkName: result.drinkId,
-          payable: result.payable
+          payable: result.payable,
+          remoteBaseUrl: meta.remoteBaseUrl || data.arguments.remoteBaseUrl || data.arguments.serverUrl
         })
       })
     }
@@ -24,7 +26,10 @@ Component({
             type: 'api/call',
             data: {
               name: 'payOrder',
-              arguments: { orderId: e.currentTarget.dataset.orderId }
+              arguments: {
+                orderId: e.currentTarget.dataset.orderId,
+                remoteBaseUrl: this.data.remoteBaseUrl
+              }
             }
           }
         ]

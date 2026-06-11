@@ -116,6 +116,34 @@ function __dockCreateSkill(skillPath) {
 }
 
 const wx = Object.freeze({
+  login(options) {
+    const payload = JSON.parse(__dock.login());
+    const callbacks = options && typeof options === 'object' ? options : {};
+    if (typeof callbacks.success === 'function') {
+      callbacks.success(payload);
+    }
+    if (typeof callbacks.complete === 'function') {
+      callbacks.complete(payload);
+    }
+    return Promise.resolve(payload);
+  },
+  request(options) {
+    const callbacks = options && typeof options === 'object' ? options : {};
+    return Promise.resolve().then(() => {
+      const payload = JSON.parse(__dock.request(__dockSafeJson(options || {})));
+      const ok = typeof payload.errMsg !== 'string' || !payload.errMsg.startsWith('request:fail');
+      if (ok && typeof callbacks.success === 'function') {
+        callbacks.success(payload);
+      }
+      if (!ok && typeof callbacks.fail === 'function') {
+        callbacks.fail(payload);
+      }
+      if (typeof callbacks.complete === 'function') {
+        callbacks.complete(payload);
+      }
+      return payload;
+    });
+  },
   modelContext: Object.freeze({
     createSkill: __dockCreateSkill
   })
@@ -176,5 +204,13 @@ mod tests {
         assert!(bootstrap.contains("globalThis, 'fetch'"));
         assert!(bootstrap.contains("globalThis, 'eval'"));
         assert!(bootstrap.contains("globalThis, 'Function'"));
+    }
+
+    #[test]
+    fn bridge_exposes_wx_login_and_request_host_boundary() {
+        let bootstrap = runtime_bootstrap();
+        assert!(bootstrap.contains("login(options)"));
+        assert!(bootstrap.contains("request(options)"));
+        assert!(bootstrap.contains("__dock.request"));
     }
 }

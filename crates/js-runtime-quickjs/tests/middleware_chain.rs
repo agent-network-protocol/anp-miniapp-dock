@@ -90,6 +90,40 @@ module.exports = skill
 }
 
 #[test]
+fn wx_login_is_available_to_atomic_api_code() {
+    let skill = test_skill(
+        r#"
+const skill = wx.modelContext.createSkill(__dirname)
+skill.registerAPI('login', async () => {
+  const login = await wx.login()
+  return {
+    content: [{ type: 'text', text: login.errMsg }],
+    structuredContent: { code: login.code }
+  }
+})
+module.exports = skill
+"#,
+        BTreeMap::new(),
+        vec!["login"],
+    );
+    let vm = ApiVm::load_skill(skill).expect("load VM");
+
+    let result = vm
+        .call(ApiCall::new("skill", "session", "login", json!({})))
+        .expect("call login");
+
+    assert_eq!(result.content[0].text, "login:ok");
+    assert_eq!(
+        result
+            .structured_content
+            .as_ref()
+            .and_then(|content| content.get("code"))
+            .and_then(|code| code.as_str()),
+        Some("dock-login-code-localhost")
+    );
+}
+
+#[test]
 fn timeout_interrupts_long_running_handler() {
     let skill = test_skill(
         r#"

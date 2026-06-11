@@ -82,6 +82,7 @@ pub fn app(state: DemoState) -> Router {
         .route("/agents/coffee/package.zip", get(package_zip_noop))
         .route("/agents/coffee/auth/challenge", post(auth_challenge))
         .route("/agents/coffee/auth/login", post(auth_login))
+        .route("/api/login", post(localhost_login))
         .route("/api/drinks", get(search_drinks))
         .route("/api/order/confirm", post(confirm_order))
         .route("/api/order/pay", post(pay_order))
@@ -214,6 +215,73 @@ async fn auth_login(
             Err(ApiError::from_auth(error))
         }
     }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LocalhostLoginRequest {
+    code: String,
+    #[serde(default)]
+    session_id: Option<String>,
+    #[serde(default)]
+    skill_id: Option<String>,
+    #[serde(default)]
+    user_did: Option<String>,
+    #[serde(default)]
+    agent_did: Option<String>,
+}
+
+async fn localhost_login(
+    State(state): State<DemoState>,
+    headers: HeaderMap,
+    Json(request): Json<LocalhostLoginRequest>,
+) -> Result<Json<Value>, ApiError> {
+    if request.code.trim().is_empty() {
+        return Err(ApiError::bad_request("login code is required".to_owned()));
+    }
+
+    let claims = authorize(&state, &headers, SCOPE_DRINKS_READ)?;
+    if request
+        .session_id
+        .as_deref()
+        .is_some_and(|session_id| session_id != claims.session_id)
+        || request
+            .skill_id
+            .as_deref()
+            .is_some_and(|skill_id| skill_id != claims.skill_id)
+        || request
+            .user_did
+            .as_deref()
+            .is_some_and(|user_did| user_did != claims.user_did)
+        || request
+            .agent_did
+            .as_deref()
+            .is_some_and(|agent_did| claims.agent_did.as_deref() != Some(agent_did))
+    {
+        return Err(ApiError::from_auth(AuthError::ScopeMismatch));
+    }
+
+    state
+        .inner
+        .audit
+        .record(AuditRecord::new("api.login", "ok").with_scope(
+            Some(claims.session_id.clone()),
+            Some(claims.skill_id.clone()),
+            Some(claims.user_did.clone()),
+        ));
+
+    Ok(Json(json!({
+        "loginStatus": "ok",
+        "tokenReceived": true,
+        "capabilityToken": "[REDACTED]",
+        "merchantDid": claims.merchant_did,
+        "userDid": claims.user_did,
+        "agentDid": claims.agent_did,
+        "skillId": claims.skill_id,
+        "sessionId": claims.session_id,
+        "scopes": claims.scopes,
+        "codeAccepted": true
+    })))
 }
 
 #[derive(Debug, Deserialize)]

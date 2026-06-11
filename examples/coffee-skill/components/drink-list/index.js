@@ -9,9 +9,11 @@ Component({
       const modelCtx = wx.modelContext.getContext(this)
       modelCtx.on(wx.modelContext.NotificationType.Result, (data) => {
         const drinks = data.result.structuredContent.drinks || []
+        const meta = data.result._meta || {}
         this.setData({
           drinks,
-          empty: drinks.length === 0
+          empty: drinks.length === 0,
+          remoteBaseUrl: meta.remoteBaseUrl || data.arguments.remoteBaseUrl || data.arguments.serverUrl
         })
       })
     }
@@ -29,7 +31,7 @@ Component({
             type: 'api/call',
             data: {
               name: 'confirmOrder',
-              arguments: { drinkId }
+              arguments: { drinkId, remoteBaseUrl: this.data.remoteBaseUrl }
             }
           }
         ]

@@ -7,6 +7,8 @@ license.workspace = true
 repository.workspace = true
 
 [dependencies]
+anp.workspace = true
+anp-adapter = { path = "../anp-adapter" }
 dock-core = { path = "../dock-core" }
 mcp-schema = { path = "../mcp-schema" }
 rquickjs.workspace = true
