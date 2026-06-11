@@ -34,6 +34,9 @@ const DEFAULT_SKILL_ID: &str = "coffee";
 const DEFAULT_USER_DID: &str = "did:wba:user.example";
 const DEFAULT_AGENT_DID: &str = "did:wba:agent.example";
 const DEFAULT_MERCHANT_DID: &str = "did:wba:coffee-merchant.example";
+const DEFAULT_IDENTITY_DIR: &str = "examples/identity";
+const DEFAULT_DID_DOCUMENT_FILE: &str = "did_document.json";
+const DEFAULT_PRIVATE_KEY_FILE: &str = "key-1-private.pem";
 
 #[derive(Debug, Parser)]
 #[command(name = "dock-cli", about = "MiniApp MCP Skill runtime developer CLI")]
@@ -208,23 +211,6 @@ impl DemoAuthConfig {
         identity_root: Option<PathBuf>,
         env: impl ConfigSource,
     ) -> Result<Option<Self>, DidCredentialError> {
-        let has_explicit_input = did_document.is_some()
-            || private_key.is_some()
-            || user_did.is_some()
-            || agent_did.is_some()
-            || identity_handle.is_some()
-            || identity_root.is_some();
-        let has_env_input = env.has_any(&[
-            "ANP_DOCK_DID_DOCUMENT",
-            "ANP_DOCK_PRIVATE_KEY",
-            "ANP_DOCK_USER_DID",
-            "ANP_DOCK_AGENT_DID",
-            "ANP_DOCK_IDENTITY_HANDLE",
-            "ANP_DOCK_IDENTITY_ROOT",
-        ]);
-        if !has_explicit_input && !has_env_input {
-            return Ok(None);
-        }
         Self::from_inputs(
             did_document,
             private_key,
@@ -254,31 +240,59 @@ impl DemoAuthConfig {
         let identity_root = identity_root.or_else(|| env.path("ANP_DOCK_IDENTITY_ROOT"));
 
         if did_document.is_some() || private_key.is_some() || user_did.is_some() {
-            if did_document.is_none() || private_key.is_none() || user_did.is_none() {
+            if did_document.is_none() || private_key.is_none() {
                 return Err(DidCredentialError::InvalidIdentity);
             }
             if identity_handle.is_some() || identity_root.is_some() {
                 return Err(DidCredentialError::InvalidIdentity);
             }
-            let credential = DidCredentialConfig::new(
+            return Self::from_credential_paths(
                 did_document.expect("checked did document"),
                 private_key.expect("checked private key"),
-            );
-            credential.validate()?;
-            return Ok(Self {
-                user_did: user_did.expect("checked user DID"),
+                user_did,
                 agent_did,
-                credential,
+            );
+        }
+
+        if identity_handle.is_some() || identity_root.is_some() {
+            let handle = identity_handle.ok_or(DidCredentialError::Unavailable)?;
+            let root = identity_root.ok_or(DidCredentialError::Unavailable)?;
+            let resolved = resolve_identity_from_store(&root, &handle)?;
+            resolved.credential.validate()?;
+            return Ok(Self {
+                agent_did,
+                ..resolved
             });
         }
 
-        let handle = identity_handle.ok_or(DidCredentialError::Unavailable)?;
-        let root = identity_root.ok_or(DidCredentialError::Unavailable)?;
-        let resolved = resolve_identity_from_store(&root, &handle)?;
-        resolved.credential.validate()?;
+        let project_root = default_project_root()?;
+        Self::from_default_project_identity(&project_root, agent_did)
+    }
+
+    fn from_default_project_identity(
+        project_root: &Path,
+        agent_did: Option<String>,
+    ) -> Result<Self, DidCredentialError> {
+        let (did_document, private_key) = default_identity_paths(project_root);
+        Self::from_credential_paths(did_document, private_key, None, agent_did)
+    }
+
+    fn from_credential_paths(
+        did_document: PathBuf,
+        private_key: PathBuf,
+        user_did: Option<String>,
+        agent_did: Option<String>,
+    ) -> Result<Self, DidCredentialError> {
+        let user_did = match user_did {
+            Some(user_did) => user_did,
+            None => did_from_document_path(&did_document)?,
+        };
+        let credential = DidCredentialConfig::new(did_document, private_key);
+        credential.validate()?;
         Ok(Self {
+            user_did,
             agent_did,
-            ..resolved
+            credential,
         })
     }
 
@@ -296,10 +310,6 @@ impl DemoAuthConfig {
 
 trait ConfigSource: Copy {
     fn string(self, name: &str) -> Option<String>;
-
-    fn has_any(self, names: &[&str]) -> bool {
-        names.iter().any(|name| self.string(name).is_some())
-    }
 
     fn path(self, name: &str) -> Option<PathBuf> {
         self.string(name)
@@ -341,6 +351,35 @@ fn resolve_identity_from_store(
             identity_dir.join("key-1-private.pem"),
         ),
     })
+}
+
+fn default_project_root() -> Result<PathBuf, DidCredentialError> {
+    let current_dir = std::env::current_dir().map_err(|_| DidCredentialError::Unavailable)?;
+    find_project_root_from(&current_dir).ok_or(DidCredentialError::Unavailable)
+}
+
+fn find_project_root_from(start: &Path) -> Option<PathBuf> {
+    let mut current = if start.is_file() {
+        start.parent()?.to_path_buf()
+    } else {
+        start.to_path_buf()
+    };
+    loop {
+        if current.join("Cargo.toml").is_file() && current.join("examples/coffee-skill").is_dir() {
+            return Some(current);
+        }
+        if !current.pop() {
+            return None;
+        }
+    }
+}
+
+fn default_identity_paths(project_root: &Path) -> (PathBuf, PathBuf) {
+    let identity_dir = project_root.join(DEFAULT_IDENTITY_DIR);
+    (
+        identity_dir.join(DEFAULT_DID_DOCUMENT_FILE),
+        identity_dir.join(DEFAULT_PRIVATE_KEY_FILE),
+    )
 }
 
 fn identity_store_dir(root: &Path) -> PathBuf {
@@ -407,6 +446,16 @@ fn identity_dir_from_index(
 fn read_json(path: PathBuf) -> Result<Value, DidCredentialError> {
     let content = std::fs::read_to_string(&path).map_err(|_| DidCredentialError::Unavailable)?;
     serde_json::from_str(&content).map_err(|_| DidCredentialError::InvalidIdentity)
+}
+
+fn did_from_document_path(path: &Path) -> Result<String, DidCredentialError> {
+    let document = read_json(path.to_path_buf())?;
+    document
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|did| !did.trim().is_empty())
+        .map(str::to_owned)
+        .ok_or(DidCredentialError::InvalidIdentity)
 }
 
 fn validate(skill_path: &Path) -> Result<Value, CliError> {
@@ -1372,6 +1421,25 @@ mod tests {
     }
 
     #[test]
+    fn derives_user_did_from_did_document_for_path_credentials() {
+        let fixture = CredentialFixture::new();
+        let config = DemoAuthConfig::from_inputs(
+            Some(fixture.did_path.clone()),
+            Some(fixture.key_path),
+            None,
+            Some("did:wba:agent.example".to_owned()),
+            None,
+            None,
+            EmptyConfigSource,
+        )
+        .expect("credential config parses");
+
+        assert_eq!(config.user_did, "did:wba:user.example");
+        assert_eq!(config.agent_did.as_deref(), Some("did:wba:agent.example"));
+        assert_eq!(config.credential.did_document_path, fixture.did_path);
+    }
+
+    #[test]
     fn incomplete_run_demo_credential_config_fails_closed() {
         let fixture = CredentialFixture::new();
 
@@ -1409,6 +1477,41 @@ mod tests {
         assert!(!summary.contains("test-only-key"));
         assert!(!summary.contains("key-1-private.pem"));
         assert!(summary.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn resolves_default_project_identity_from_examples_identity() {
+        let fixture = ProjectIdentityFixture::new();
+        let config = DemoAuthConfig::from_default_project_identity(&fixture.root, None)
+            .expect("default project identity resolves");
+
+        assert_eq!(config.user_did, "did:wba:default-user.example");
+        assert_eq!(
+            config.credential.did_document_path,
+            fixture
+                .root
+                .join(DEFAULT_IDENTITY_DIR)
+                .join(DEFAULT_DID_DOCUMENT_FILE)
+        );
+        assert_eq!(
+            config.credential.private_key_path,
+            fixture
+                .root
+                .join(DEFAULT_IDENTITY_DIR)
+                .join(DEFAULT_PRIVATE_KEY_FILE)
+        );
+    }
+
+    #[test]
+    fn finds_project_root_from_child_directory() {
+        let fixture = ProjectIdentityFixture::new();
+        let child = fixture.root.join("crates/dock-cli/src");
+        fs::create_dir_all(&child).expect("create child dir");
+
+        assert_eq!(
+            find_project_root_from(&child).as_deref(),
+            Some(fixture.root.as_path())
+        );
     }
 
     #[derive(Clone, Copy)]
@@ -1472,6 +1575,31 @@ mod tests {
                 key_path,
                 _dir: dir,
             }
+        }
+    }
+
+    struct ProjectIdentityFixture {
+        _dir: TempDir,
+        root: PathBuf,
+    }
+
+    impl ProjectIdentityFixture {
+        fn new() -> Self {
+            let dir = TempDir::new("dock-cli-project-identity").expect("temp dir");
+            let root = dir.path().join("repo");
+            let identity = root.join(DEFAULT_IDENTITY_DIR);
+            fs::create_dir_all(&identity).expect("create default identity dir");
+            fs::create_dir_all(root.join("examples/coffee-skill")).expect("create skill dir");
+            fs::write(root.join("Cargo.toml"), b"[workspace]\n").expect("write manifest");
+            fs::write(
+                identity.join(DEFAULT_DID_DOCUMENT_FILE),
+                br#"{"id":"did:wba:default-user.example"}"#,
+            )
+            .expect("write DID document");
+            let key_path = identity.join(DEFAULT_PRIVATE_KEY_FILE);
+            fs::write(&key_path, "test-only-key").expect("write key");
+            set_private_key_permissions(&key_path);
+            Self { _dir: dir, root }
         }
     }
 

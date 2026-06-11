@@ -25,7 +25,7 @@ Useful repository commands:
 - `cargo test --workspace` runs all workspace tests.
 - `cargo test -p dock-cli --test coffee_order_flow` runs the coffee CLI E2E.
 - `cargo run -p demo-server -- --host 127.0.0.1 --port 3000 --skill examples/coffee-skill --token-issuer-secret <secret> --trusted-did-document <did>=<path>` starts the local coffee merchant Agent demo with real DID auth configured.
-- `cargo run -p dock-cli -- run-demo --skill examples/coffee-skill --server http://127.0.0.1:3000 --did-document <path> --private-key <path> --user-did <did>` runs the local coffee flow through the CLI; see `docs/runbook/local-demo.md` for full credential options.
+- `cargo run -p dock-cli -- run-demo --skill examples/coffee-skill --server http://127.0.0.1:3000` runs the local coffee flow through the CLI using `examples/identity/did_document.json` and `examples/identity/key-1-private.pem` by default; see `docs/runbook/local-demo.md` for full credential options.
 - `rg "QuickJS|MCP|DID" docs README.md` searches project docs quickly.
 - `git status --short` checks pending local changes before editing.
 - `git diff -- README.md docs/ AGENTS.md` reviews documentation changes.

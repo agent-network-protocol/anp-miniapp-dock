@@ -36,7 +36,7 @@ cargo run -p demo-server -- \
   --port 3000 \
   --skill examples/coffee-skill \
   --token-issuer-secret test-only-local-secret \
-  --trusted-did-document <user-did>=/path/to/identity/did_document.json
+  --trusted-did-document '<user-did>=examples/identity/did_document.json'
 ```
 
 The server exposes:
@@ -54,6 +54,15 @@ The server exposes:
 - `GET /audit`
 
 The `--trusted-did-document` value must use the same DID that the CLI will sign with. The path points to the public DID document, not the private key.
+
+By default, `dock-cli run-demo` reads DID credentials from:
+
+```text
+examples/identity/did_document.json
+examples/identity/key-1-private.pem
+```
+
+The CLI derives `userDid` from the DID document `id`. These local files are intentionally ignored by Git and must not be committed.
 
 ## Run CLI Commands
 
@@ -86,9 +95,7 @@ Run the coffee flow against the server:
 ```bash
 cargo run -p dock-cli -- run-demo \
   --skill examples/coffee-skill \
-  --server http://127.0.0.1:3000 \
-  --identity-handle miniapp-test.awiki.ai \
-  --identity-root /path/to/identity-store/identities
+  --server http://127.0.0.1:3000
 ```
 
 Equivalent explicit credential flags are also supported:
@@ -99,11 +106,10 @@ cargo run -p dock-cli -- run-demo \
   --server http://127.0.0.1:3000 \
   --did-document /path/to/identity/did_document.json \
   --private-key /path/to/identity/key-1-private.pem \
-  --user-did <user-did> \
   --agent-did did:wba:agent.example
 ```
 
-The same values can be supplied through `ANP_DOCK_DID_DOCUMENT`, `ANP_DOCK_PRIVATE_KEY`, `ANP_DOCK_USER_DID`, `ANP_DOCK_AGENT_DID`, `ANP_DOCK_IDENTITY_HANDLE`, and `ANP_DOCK_IDENTITY_ROOT`.
+The same values can be supplied through `ANP_DOCK_DID_DOCUMENT`, `ANP_DOCK_PRIVATE_KEY`, `ANP_DOCK_USER_DID`, `ANP_DOCK_AGENT_DID`, `ANP_DOCK_IDENTITY_HANDLE`, and `ANP_DOCK_IDENTITY_ROOT`. `ANP_DOCK_USER_DID` is optional when the DID document contains a valid `id`.
 
 `run-demo` performs:
 
@@ -126,7 +132,7 @@ cargo run -p demo-server -- \
   --port 0 \
   --skill examples/coffee-skill \
   --token-issuer-secret test-only-local-secret \
-  --trusted-did-document <user-did>=/path/to/identity/did_document.json
+  --trusted-did-document '<user-did>=examples/identity/did_document.json'
 ```
 
 This avoids port conflicts in CI-like local runs.
@@ -134,7 +140,7 @@ This avoids port conflicts in CI-like local runs.
 ## Troubleshooting
 
 - `connection refused`: confirm `demo-server` is running and use the exact printed URL.
-- `DID credential is unavailable for session`: pass either `--did-document` + `--private-key` + `--user-did`, or `--identity-handle` + `--identity-root`.
+- `DID credential is unavailable for session`: create `examples/identity/did_document.json` and `examples/identity/key-1-private.pem`, or pass either `--did-document` + `--private-key`, or `--identity-handle` + `--identity-root`.
 - `invalid_signature`: confirm the CLI private key matches the DID document configured in `--trusted-did-document`.
 - `unknown_did`: confirm the server was started with `--trusted-did-document <user-did>=...` and that `<user-did>` matches the CLI signer DID.
 - `scope_mismatch`: confirm the challenge, login request, Skill ID, session ID, user DID, agent DID, and merchant DID are from the same flow.
