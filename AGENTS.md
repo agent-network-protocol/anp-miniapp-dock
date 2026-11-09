@@ -40,6 +40,8 @@ Keep terminology consistent with the architecture docs: use `Skill`, `MCP`, `ANP
 
 Run `cargo test --workspace` for code changes unless a step plan records a narrower crate-level command. Run `cargo clippy --workspace --all-targets -- -D warnings` before commits that touch Rust behavior. For documentation changes, verify headings, relative links, and command snippets manually. Include focused tests alongside implementation or under the owning crate's `tests/` directory when behavior is added.
 
+Any code addition or modification must, in the same task, add or update the corresponding unit tests, system tests, and end-to-end (E2E) tests. Keep each test in its owning repository or harness; when a required test layer is owned by another repository, update that repository in the same task.
+
 ## Commit & Pull Request Guidelines
 
 The current history only contains `Initial commit`, so no detailed convention has been established. Use short, imperative commit subjects, for example `Add Skill loader architecture notes` or `Document MCP card rendering flow`.
