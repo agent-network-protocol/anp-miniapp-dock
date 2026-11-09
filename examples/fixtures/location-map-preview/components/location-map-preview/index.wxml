@@ -1,0 +1,8 @@
+<view class="fixture-card">
+  <text class="title">Mock location preview</text>
+  <map id="store-map" region="{{ region }}" location-token="{{ locationToken }}" title="Mock pickup area" description="{{ providerStatus }}" scale="12" />
+  <text>{{ providerStatus }}</text>
+  <text>{{ fallbackReason }}</text>
+  <button class="primary" bindtap="requestLocation" data-location-token="{{ locationToken }}">Request Host location</button>
+</view>
+

@@ -1,0 +1,50 @@
+{
+  "apis": [
+    {
+      "name": "refreshDynamicStatus",
+      "description": "Refresh mock order status through a dynamic component boundary",
+      "_meta": {
+        "ui": {
+          "componentPath": "components/dynamic-status/index"
+        },
+        "anp": {
+          "risk": "l2"
+        }
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "orderId": {
+            "type": "string"
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "orderId": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        },
+        "required": ["orderId", "status"]
+      }
+    }
+  ],
+  "components": [
+    {
+      "path": "components/dynamic-status/index",
+      "permissions": {
+        "scope.dynamic": {
+          "desc": "Poll mock order status through RequestBroker",
+          "reason": "fixture-only status refresh"
+        }
+      },
+      "expirable": true,
+      "expiredText": "Mock dynamic status expired"
+    }
+  ]
+}
+

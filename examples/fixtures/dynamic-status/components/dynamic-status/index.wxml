@@ -1,0 +1,9 @@
+<view class="fixture-card">
+  <text class="title">Mock dynamic status</text>
+  <text>{{ orderId }}</text>
+  <text>{{ status }}</text>
+  <text>{{ timerState }}</text>
+  <text>{{ safeHeader }}</text>
+  <button class="primary" bindtap="refresh" data-order-id="{{ orderId }}">Refresh status</button>
+</view>
+

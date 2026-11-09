@@ -1,6 +1,7 @@
 use crate::resolver::{
     resolve_component_path, resolve_package_path, resolve_skill_path, SkillPackageError,
 };
+use crate::{verify_package_integrity, PackageIntegrityPolicy, PackageIntegrityReport};
 use mcp_schema::{validate_manifest_with_component_paths, SkillManifest, ValidationReport};
 use std::collections::BTreeMap;
 use std::fs;
@@ -18,6 +19,7 @@ pub struct LoadedSkill {
     pub root: PathBuf,
     pub skill_md: SourceFile,
     pub manifest: SkillManifest,
+    pub integrity: PackageIntegrityReport,
     pub entry_js: SourceFile,
     pub api_modules: BTreeMap<String, SourceFile>,
     pub components: BTreeMap<String, LoadedComponent>,
@@ -36,6 +38,13 @@ pub struct LoadedComponent {
 }
 
 pub fn load_skill(skill_root: impl AsRef<Path>) -> Result<LoadedSkill, SkillPackageError> {
+    load_skill_with_integrity_policy(skill_root, &PackageIntegrityPolicy::development())
+}
+
+pub fn load_skill_with_integrity_policy(
+    skill_root: impl AsRef<Path>,
+    integrity_policy: &PackageIntegrityPolicy,
+) -> Result<LoadedSkill, SkillPackageError> {
     let root = resolve_skill_path(skill_root)?;
     let skill_md = read_required_file(&root, "SKILL.md")?;
     let manifest_file = read_required_file(&root, "mcp.json")?;
@@ -46,6 +55,12 @@ pub fn load_skill(skill_root: impl AsRef<Path>) -> Result<LoadedSkill, SkillPack
                 source,
             }
         })?;
+    let integrity = verify_package_integrity(&root, &manifest, integrity_policy)?;
+    if integrity_policy.is_production() && integrity.quarantine {
+        return Err(SkillPackageError::PackageQuarantined {
+            reason: integrity.issue_codes.join(","),
+        });
+    }
     let entry_js = read_required_file(&root, "index.js")?;
     let api_modules = discover_api_modules(&root)?;
     let discovered_component_paths = discover_component_paths(&root)?;
@@ -76,6 +91,7 @@ pub fn load_skill(skill_root: impl AsRef<Path>) -> Result<LoadedSkill, SkillPack
         root,
         skill_md,
         manifest,
+        integrity,
         entry_js,
         api_modules,
         components,

@@ -1,0 +1,33 @@
+{
+  "schemaVersion": "dock.test-skill-report.v1",
+  "status": "ok",
+  "commandStatus": "ok",
+  "skillId": "media-review",
+  "fixtureSet": "media-review",
+  "mockProvider": {
+    "status": "dev-only",
+    "productionReady": false
+  },
+  "summary": {
+    "total": 1,
+    "failed": 0
+  },
+  "cases": [
+    {
+      "name": "media-review.reviewMedia",
+      "status": "pass",
+      "apiName": "reviewMedia",
+      "componentPath": "components/media-review/index",
+      "snapshot": "testdata/render-ir/media-review.reviewMedia.json",
+      "snapshotStatus": "match",
+      "auditBoundary": "host-media-provider-required",
+      "riskLevel": "L4",
+      "dataPolicy": "opaque-file-and-image-handles-only"
+    }
+  ],
+  "riskNotes": [
+    "mock-only compatibility fixture",
+    "uses opaque image and file handles only",
+    "production Host media/file provider and audit review are required"
+  ]
+}

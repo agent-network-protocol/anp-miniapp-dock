@@ -1,0 +1,33 @@
+{
+  "schemaVersion": "dock.test-skill-report.v1",
+  "status": "ok",
+  "commandStatus": "ok",
+  "skillId": "dynamic-status",
+  "fixtureSet": "dynamic-status",
+  "mockProvider": {
+    "status": "dev-only",
+    "productionReady": false
+  },
+  "summary": {
+    "total": 1,
+    "failed": 0
+  },
+  "cases": [
+    {
+      "name": "dynamic-status.refreshDynamicStatus",
+      "status": "pass",
+      "apiName": "refreshDynamicStatus",
+      "componentPath": "components/dynamic-status/index",
+      "snapshot": "testdata/render-ir/dynamic-status.refreshDynamicStatus.json",
+      "snapshotStatus": "match",
+      "auditBoundary": "dynamic-request-timer-gated",
+      "riskLevel": "L2",
+      "dataPolicy": "response-auth-headers-redacted"
+    }
+  ],
+  "riskNotes": [
+    "mock-only compatibility fixture",
+    "uses dev-only headless RequestBroker",
+    "production dynamic request policy and audit persistence are required"
+  ]
+}

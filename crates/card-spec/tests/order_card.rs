@@ -16,12 +16,12 @@ fn structured_content_generates_stable_order_card() {
         extra: Default::default(),
     };
 
-    let card = fallback_from_result(&result, FallbackReason::ComponentRenderFailed);
+    let card = fallback_from_result(&result, FallbackReason::ComponentVmFailed);
     let card_json = serde_json::to_value(&card).expect("serialize card");
     let rendered = serde_json::to_string(&card_json).expect("stringify card");
 
     assert_eq!(card.status, CardStatus::Normal);
-    assert_eq!(card.fallback_reason, "component_render_failed");
+    assert_eq!(card.fallback_reason, "component_vm_failed");
     assert!(!rendered.contains("privateComponentState"));
     assert_eq!(
         card_json,
@@ -29,7 +29,7 @@ fn structured_content_generates_stable_order_card() {
             "version": "card-spec/v0",
             "title": "Response",
             "status": "normal",
-            "fallbackReason": "component_render_failed",
+            "fallbackReason": "component_vm_failed",
             "sections": [{
                 "title": "Structured content",
                 "items": [
@@ -76,6 +76,41 @@ fn empty_structured_content_has_explicit_reason() {
 
     assert_eq!(card.status, CardStatus::Empty);
     assert_eq!(card.fallback_reason, "empty_structured_content");
+}
+
+#[test]
+fn fallback_reason_enum_serializes_stable_values() {
+    let reasons = [
+        (FallbackReason::NoComponentPath, "no_component_path"),
+        (FallbackReason::ComponentMissing, "component_missing"),
+        (FallbackReason::ComponentLoadFailed, "component_load_failed"),
+        (FallbackReason::ComponentVmFailed, "component_vm_failed"),
+        (FallbackReason::WxmlParseFailed, "wxml_parse_failed"),
+        (
+            FallbackReason::WxssParseWarningThreshold,
+            "wxss_parse_warning_threshold",
+        ),
+        (FallbackReason::UnsupportedNodeKind, "unsupported_node_kind"),
+        (
+            FallbackReason::HostRendererUnavailable,
+            "host_renderer_unavailable",
+        ),
+        (FallbackReason::ApiError, "api_error"),
+        (
+            FallbackReason::EmptyStructuredContent,
+            "empty_structured_content",
+        ),
+    ];
+
+    for (reason, stable) in reasons {
+        assert_eq!(reason.as_str(), stable);
+        assert_eq!(FallbackReason::from_stable_str(stable), Some(reason));
+    }
+
+    assert_eq!(
+        FallbackReason::normalize("render_failed: /tmp/private/component.js").as_str(),
+        "component_vm_failed"
+    );
 }
 
 fn map<const N: usize>(pairs: [(&str, Value); N]) -> Map<String, Value> {

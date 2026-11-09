@@ -13,13 +13,15 @@ pub use compiler::{
     ComponentCompileError, ComponentRenderOutput,
 };
 pub use component_vm::{
-    ComponentInput, ComponentInstance, ComponentOperationOutcome, ComponentTraceEntry,
-    ComponentTraceKind, ComponentVmAction, ComponentVmConfig, ComponentVmError,
+    ComponentInput, ComponentInstance, ComponentMetadata, ComponentOperationOutcome,
+    ComponentTraceEntry, ComponentTraceKind, ComponentVmAction, ComponentVmConfig,
+    ComponentVmError, DynamicComponentConfig,
 };
 pub use events::{ComponentEvent, ComponentEventKind};
 pub use loader::{ComponentLoadError, ComponentPackage};
 pub use render_ir::{
     ComponentAction, RenderEventBinding, RenderEventKind, RenderNode, RenderNodeKind, RenderStyle,
+    RENDER_IR_SCHEMA_VERSION,
 };
 pub use wxml::{parse_wxml, WxmlElement, WxmlNode, WxmlParseError};
 pub use wxss::{merge_styles, parse_inline_style, WxssStyleSheet};

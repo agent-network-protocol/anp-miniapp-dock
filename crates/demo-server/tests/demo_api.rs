@@ -277,6 +277,38 @@ async fn demo_signature_and_replayed_challenge_are_rejected() {
     assert!(body.contains("invalid_signature"));
 
     let proof = sign_login_proof(&challenge, &fixture, "session-1", "coffee");
+    let retry_body = json!({
+        "sessionId": "session-1",
+        "skillId": "coffee",
+        "userDid": fixture.did(),
+        "agentDid": "did:wba:agent.example",
+        "merchantDid": challenge["merchantDid"],
+        "challengeId": challenge["challengeId"],
+        "signedChallenge": proof
+    });
+    let (retry, retry_body_text) = request(
+        addr,
+        "POST",
+        "/agents/coffee/auth/login",
+        None,
+        Some(retry_body),
+    );
+    assert_eq!(retry, 401);
+    assert!(retry_body_text.contains("unknown_challenge"));
+
+    let challenge = json_response(
+        addr,
+        "POST",
+        "/agents/coffee/auth/challenge",
+        None,
+        Some(json!({
+            "sessionId": "session-1",
+            "skillId": "coffee",
+            "userDid": fixture.did(),
+            "agentDid": "did:wba:agent.example"
+        })),
+    );
+    let proof = sign_login_proof(&challenge, &fixture, "session-1", "coffee");
     let body = json!({
         "sessionId": "session-1",
         "skillId": "coffee",

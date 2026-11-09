@@ -1,0 +1,51 @@
+{
+  "apis": [
+    {
+      "name": "prepareAddressForm",
+      "description": "Prepare a mock delivery address form with opaque Host handles only",
+      "_meta": {
+        "ui": {
+          "componentPath": "components/address-form/index"
+        },
+        "anp": {
+          "risk": "l4"
+        }
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "addressHandle": {
+            "type": "string",
+            "description": "Opaque Host address handle, not a real address"
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "form": {
+            "type": "object"
+          },
+          "boundary": {
+            "type": "object"
+          }
+        },
+        "required": ["form", "boundary"]
+      }
+    }
+  ],
+  "components": [
+    {
+      "path": "components/address-form/index",
+      "expirable": true,
+      "expiredText": "Mock address form expired",
+      "relatedPage": {
+        "path": "pages/address/review",
+        "query": {
+          "fixture": "address-form"
+        }
+      }
+    }
+  ]
+}
+

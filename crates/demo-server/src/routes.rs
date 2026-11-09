@@ -459,6 +459,16 @@ impl ApiError {
                 "expired_token",
                 "capability token is expired",
             ),
+            AuthError::RevokedToken => (
+                StatusCode::FORBIDDEN,
+                "revoked_token",
+                "capability token has been revoked",
+            ),
+            AuthError::ReplayedToken => (
+                StatusCode::FORBIDDEN,
+                "replayed_token",
+                "capability token replay was detected",
+            ),
             AuthError::InsufficientScope => (
                 StatusCode::FORBIDDEN,
                 "insufficient_scope",

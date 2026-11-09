@@ -1,0 +1,10 @@
+<view class="fixture-card">
+  <text class="title">Mock media review</text>
+  <image class="preview" src="{{ previewImage }}" bindload="onImageLoad" binderror="onImageError" />
+  <canvas canvas-id="media-poster" poster="{{ poster }}" description="Static media poster" width="320" height="180" />
+  <text class="handle">{{ imageHandle }}</text>
+  <text class="handle">{{ fileHandle }}</text>
+  <text class="boundary">{{ boundary }}</text>
+  <button class="primary" bindtap="approve">Approve opaque handles</button>
+</view>
+

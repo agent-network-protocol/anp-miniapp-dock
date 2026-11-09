@@ -6,6 +6,10 @@ use std::collections::BTreeMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 
+pub const CONSENT_POLICY_VERSION: &str = "dock.consent.v1";
+pub const DEV_HEADLESS_CONSENT_PROVIDER: &str = "dev-headless-consent";
+pub const DEV_HEADLESS_DECISION_ACTOR: &str = "host.headless.dev";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum RiskLevel {
     L0,
@@ -91,6 +95,9 @@ pub struct ConsentRequestInput<'a> {
 #[serde(rename_all = "camelCase")]
 pub struct ConsentProof {
     pub proof_id: String,
+    pub policy_version: String,
+    pub prompt_digest: String,
+    pub decision_actor: String,
     pub user_did: Option<String>,
     pub agent_did: Option<String>,
     pub merchant_did: Option<String>,
@@ -108,28 +115,117 @@ pub trait ConsentProvider {
     fn request_consent(&self, request: &ConsentRequest) -> Result<ConsentStatus, ConsentError>;
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HostConsentDecision {
+    pub status: ConsentStatus,
+    pub provider: String,
+    pub decision_actor: String,
+}
+
+impl HostConsentDecision {
+    pub fn approved(provider: impl Into<String>, decision_actor: impl Into<String>) -> Self {
+        Self {
+            status: ConsentStatus::Approved,
+            provider: provider.into(),
+            decision_actor: decision_actor.into(),
+        }
+    }
+
+    pub fn denied(provider: impl Into<String>, decision_actor: impl Into<String>) -> Self {
+        Self {
+            status: ConsentStatus::Denied,
+            provider: provider.into(),
+            decision_actor: decision_actor.into(),
+        }
+    }
+}
+
+pub trait HostConsentAdapter {
+    fn request_host_consent(
+        &self,
+        request: &ConsentRequest,
+    ) -> Result<HostConsentDecision, ConsentError>;
+}
+
+impl<T> ConsentProvider for T
+where
+    T: HostConsentAdapter,
+{
+    fn request_consent(&self, request: &ConsentRequest) -> Result<ConsentStatus, ConsentError> {
+        Ok(self.request_host_consent(request)?.status)
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct DecisionConsentProvider {
     status: ConsentStatus,
+    provider: String,
+    decision_actor: String,
 }
 
 impl DecisionConsentProvider {
     pub fn approved() -> Self {
         Self {
             status: ConsentStatus::Approved,
+            provider: DEV_HEADLESS_CONSENT_PROVIDER.to_owned(),
+            decision_actor: DEV_HEADLESS_DECISION_ACTOR.to_owned(),
         }
     }
 
     pub fn denied() -> Self {
         Self {
             status: ConsentStatus::Denied,
+            provider: DEV_HEADLESS_CONSENT_PROVIDER.to_owned(),
+            decision_actor: DEV_HEADLESS_DECISION_ACTOR.to_owned(),
+        }
+    }
+
+    pub fn with_provider(mut self, provider: impl Into<String>) -> Self {
+        self.provider = provider.into();
+        self
+    }
+
+    pub fn with_decision_actor(mut self, decision_actor: impl Into<String>) -> Self {
+        self.decision_actor = decision_actor.into();
+        self
+    }
+}
+
+impl HostConsentAdapter for DecisionConsentProvider {
+    fn request_host_consent(
+        &self,
+        _request: &ConsentRequest,
+    ) -> Result<HostConsentDecision, ConsentError> {
+        Ok(HostConsentDecision {
+            status: self.status.clone(),
+            provider: self.provider.clone(),
+            decision_actor: self.decision_actor.clone(),
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct UnavailableConsentProvider {
+    provider: String,
+}
+
+impl UnavailableConsentProvider {
+    pub fn new(provider: impl Into<String>) -> Self {
+        Self {
+            provider: provider.into(),
         }
     }
 }
 
-impl ConsentProvider for DecisionConsentProvider {
-    fn request_consent(&self, _request: &ConsentRequest) -> Result<ConsentStatus, ConsentError> {
-        Ok(self.status.clone())
+impl HostConsentAdapter for UnavailableConsentProvider {
+    fn request_host_consent(
+        &self,
+        _request: &ConsentRequest,
+    ) -> Result<HostConsentDecision, ConsentError> {
+        Err(ConsentError::ProviderUnavailable {
+            provider: self.provider.clone(),
+        })
     }
 }
 
@@ -140,6 +236,9 @@ pub enum ConsentError {
 
     #[error("consent provider failed: {0}")]
     Provider(String),
+
+    #[error("consent provider `{provider}` is unavailable")]
+    ProviderUnavailable { provider: String },
 }
 
 #[derive(Debug, Clone, Default)]
@@ -187,15 +286,33 @@ pub fn consent_proof(
     provider: impl Into<String>,
     parameter_digest: impl Into<String>,
 ) -> ConsentProof {
+    consent_proof_with_decision(
+        request,
+        provider,
+        DEV_HEADLESS_DECISION_ACTOR,
+        parameter_digest,
+    )
+}
+
+pub fn consent_proof_with_decision(
+    request: &ConsentRequest,
+    provider: impl Into<String>,
+    decision_actor: impl Into<String>,
+    parameter_digest: impl Into<String>,
+) -> ConsentProof {
     let granted_at_ms = now_ms();
     let parameter_digest = parameter_digest.into();
+    let prompt_digest = consent_prompt_digest(request);
     let proof_id = format!(
-        "consent:{}:{}:{}:{}",
-        request.skill_id, request.api_name, granted_at_ms, parameter_digest
+        "consent:{}:{}:{}:{}:{}",
+        CONSENT_POLICY_VERSION, request.skill_id, request.api_name, granted_at_ms, parameter_digest
     );
 
     ConsentProof {
         proof_id,
+        policy_version: CONSENT_POLICY_VERSION.to_owned(),
+        prompt_digest,
+        decision_actor: decision_actor.into(),
         user_did: request.user_did.clone(),
         agent_did: request.agent_did.clone(),
         merchant_did: request.merchant_did.clone(),
@@ -208,6 +325,22 @@ pub fn consent_proof(
         parameter_digest,
         provider: provider.into(),
     }
+}
+
+pub fn consent_prompt_digest(request: &ConsentRequest) -> String {
+    let prompt_material = serde_json::json!({
+        "policyVersion": CONSENT_POLICY_VERSION,
+        "userDid": request.user_did,
+        "agentDid": request.agent_did,
+        "merchantDid": request.merchant_did,
+        "skillId": request.skill_id,
+        "sessionId": request.session_id,
+        "apiName": request.api_name,
+        "riskLevel": request.risk_level,
+        "requestedAtMs": request.requested_at_ms,
+        "parameterSummary": request.parameter_summary,
+    });
+    parameter_digest(&prompt_material)
 }
 
 pub fn parameter_digest(value: &Value) -> String {

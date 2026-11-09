@@ -1,0 +1,9 @@
+<view class="fixture-card">
+  <text class="title">Mock delivery address</text>
+  <input name="recipient" value="{{ recipient }}" placeholder="Recipient name" maxlength="32" bindinput="onRecipient" />
+  <textarea name="note" value="{{ note }}" placeholder="Delivery note" bindinput="onNote"></textarea>
+  <picker name="slot" range="{{ slots }}" value="{{ selectedSlot }}" bindchange="onSlotChange"></picker>
+  <text class="boundary">{{ boundary }}</text>
+  <button class="primary" bindtap="submit" data-address-handle="{{ addressHandle }}">Use opaque address handle</button>
+</view>
+

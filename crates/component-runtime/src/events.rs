@@ -6,6 +6,8 @@ use serde_json::{json, Map, Value};
 #[serde(rename_all = "snake_case")]
 pub enum ComponentEventKind {
     Tap,
+    Input,
+    Change,
     ImageLoad,
     ImageError,
 }
@@ -13,7 +15,9 @@ pub enum ComponentEventKind {
 impl From<&RenderEventKind> for ComponentEventKind {
     fn from(kind: &RenderEventKind) -> Self {
         match kind {
-            RenderEventKind::Tap => Self::Tap,
+            RenderEventKind::Tap | RenderEventKind::CatchTap => Self::Tap,
+            RenderEventKind::Input => Self::Input,
+            RenderEventKind::Change => Self::Change,
             RenderEventKind::ImageLoad => Self::ImageLoad,
             RenderEventKind::ImageError => Self::ImageError,
         }

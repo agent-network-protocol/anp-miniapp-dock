@@ -8,9 +8,12 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 
 pub const CAPABILITY_TOKEN_VERSION: &str = "dock.capability.v1";
+pub const CAPABILITY_TOKEN_SCOPE_DERIVATION_SOURCE: &str =
+    "CapabilityTokenRequest merchant_did/user_did/agent_did/skill_id/session_id/scopes";
 pub const DEFAULT_CAPABILITY_TOKEN_TTL_MS: u64 = 300_000;
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct CapabilityTokenScope {
     pub merchant_did: String,
     pub user_did: String,
@@ -82,6 +85,103 @@ pub trait CapabilityTokenCache: Clone {
     fn clear(&self, scope: &CapabilityTokenScope);
 }
 
+pub trait CapabilityTokenLifecycleStore {
+    fn revoke_jti(&self, jti: &str, expires_at_ms: u64) -> Result<(), CapabilityTokenError>;
+    fn is_revoked(&self, jti: &str, now_ms: u64) -> Result<bool, CapabilityTokenError>;
+    fn is_consumed_once(&self, jti: &str, now_ms: u64) -> Result<bool, CapabilityTokenError>;
+    fn consume_jti_once(
+        &self,
+        jti: &str,
+        expires_at_ms: u64,
+        now_ms: u64,
+    ) -> Result<(), CapabilityTokenError>;
+    fn prune_expired(&self, now_ms: u64) -> Result<usize, CapabilityTokenError>;
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct InMemoryTokenLifecycleStore {
+    state: Arc<Mutex<TokenLifecycleState>>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct TokenLifecycleState {
+    revoked: BTreeMap<String, u64>,
+    seen_once: BTreeMap<String, u64>,
+}
+
+impl InMemoryTokenLifecycleStore {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl CapabilityTokenLifecycleStore for InMemoryTokenLifecycleStore {
+    fn revoke_jti(&self, jti: &str, expires_at_ms: u64) -> Result<(), CapabilityTokenError> {
+        if jti.trim().is_empty() {
+            return Err(CapabilityTokenError::InvalidClaims);
+        }
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| CapabilityTokenError::LifecycleUnavailable)?;
+        state.revoked.insert(jti.to_owned(), expires_at_ms);
+        Ok(())
+    }
+
+    fn is_revoked(&self, jti: &str, now_ms: u64) -> Result<bool, CapabilityTokenError> {
+        if jti.trim().is_empty() {
+            return Err(CapabilityTokenError::InvalidClaims);
+        }
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| CapabilityTokenError::LifecycleUnavailable)?;
+        prune_state(&mut state, now_ms);
+        Ok(state.revoked.contains_key(jti))
+    }
+
+    fn is_consumed_once(&self, jti: &str, now_ms: u64) -> Result<bool, CapabilityTokenError> {
+        if jti.trim().is_empty() {
+            return Err(CapabilityTokenError::InvalidClaims);
+        }
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| CapabilityTokenError::LifecycleUnavailable)?;
+        prune_state(&mut state, now_ms);
+        Ok(state.seen_once.contains_key(jti))
+    }
+
+    fn consume_jti_once(
+        &self,
+        jti: &str,
+        expires_at_ms: u64,
+        now_ms: u64,
+    ) -> Result<(), CapabilityTokenError> {
+        if jti.trim().is_empty() {
+            return Err(CapabilityTokenError::InvalidClaims);
+        }
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| CapabilityTokenError::LifecycleUnavailable)?;
+        prune_state(&mut state, now_ms);
+        if state.seen_once.contains_key(jti) {
+            return Err(CapabilityTokenError::Replayed);
+        }
+        state.seen_once.insert(jti.to_owned(), expires_at_ms);
+        Ok(())
+    }
+
+    fn prune_expired(&self, now_ms: u64) -> Result<usize, CapabilityTokenError> {
+        let mut state = self
+            .state
+            .lock()
+            .map_err(|_| CapabilityTokenError::LifecycleUnavailable)?;
+        Ok(prune_state(&mut state, now_ms))
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct InMemoryTokenCache {
     tokens: Arc<Mutex<BTreeMap<CapabilityTokenScope, CapabilityToken>>>,
@@ -90,6 +190,15 @@ pub struct InMemoryTokenCache {
 impl InMemoryTokenCache {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    fn snapshot_persistent_entries(&self, now_ms: u64) -> Vec<PersistentCapabilityTokenEntry> {
+        let mut tokens = self.tokens.lock().expect("token cache mutex poisoned");
+        tokens.retain(|_, token| !token.is_expired_at(now_ms));
+        tokens
+            .iter()
+            .map(|(scope, token)| PersistentCapabilityTokenEntry::new(scope.clone(), token.clone()))
+            .collect()
     }
 }
 
@@ -112,6 +221,292 @@ impl CapabilityTokenCache for InMemoryTokenCache {
     fn clear(&self, scope: &CapabilityTokenScope) {
         let mut tokens = self.tokens.lock().expect("token cache mutex poisoned");
         tokens.remove(scope);
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TokenCachePersistenceProfile {
+    InMemoryDev,
+    HostSecureStore,
+    EncryptedBackend,
+}
+
+impl TokenCachePersistenceProfile {
+    pub fn production_ready(self) -> bool {
+        matches!(
+            self,
+            TokenCachePersistenceProfile::HostSecureStore
+                | TokenCachePersistenceProfile::EncryptedBackend
+        )
+    }
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct PersistentCapabilityTokenEntry {
+    pub scope: CapabilityTokenScope,
+    pub issuer: String,
+    pub audience: String,
+    pub jti: String,
+    token_value: String,
+    pub expires_at_ms: Option<u64>,
+}
+
+impl PersistentCapabilityTokenEntry {
+    pub fn new(scope: CapabilityTokenScope, token: CapabilityToken) -> Self {
+        let metadata = decode_token_for_restore(&token.value).ok();
+        Self {
+            scope,
+            issuer: metadata
+                .as_ref()
+                .map(|claims| claims.iss.clone())
+                .unwrap_or_default(),
+            audience: metadata
+                .as_ref()
+                .map(|claims| claims.aud.clone())
+                .unwrap_or_default(),
+            jti: metadata
+                .as_ref()
+                .map(|claims| claims.jti.clone())
+                .unwrap_or_default(),
+            token_value: token.value,
+            expires_at_ms: token.expires_at_ms,
+        }
+    }
+
+    pub fn token(&self) -> CapabilityToken {
+        CapabilityToken::new(self.token_value.clone(), self.expires_at_ms)
+    }
+}
+
+impl fmt::Debug for PersistentCapabilityTokenEntry {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("PersistentCapabilityTokenEntry")
+            .field("scope", &self.scope)
+            .field("issuer", &self.issuer)
+            .field("audience", &self.audience)
+            .field("jti", &"[REDACTED]")
+            .field("token_value", &"[REDACTED]")
+            .field("expires_at_ms", &self.expires_at_ms)
+            .finish()
+    }
+}
+
+pub trait TokenCachePersistenceBackend: Clone {
+    fn profile(&self) -> TokenCachePersistenceProfile;
+    fn load_entries(&self) -> Result<Vec<PersistentCapabilityTokenEntry>, CapabilityTokenError>;
+    fn replace_entries(
+        &self,
+        entries: Vec<PersistentCapabilityTokenEntry>,
+    ) -> Result<(), CapabilityTokenError>;
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct InMemoryTokenCachePersistenceBackend {
+    entries: Arc<Mutex<Vec<PersistentCapabilityTokenEntry>>>,
+}
+
+impl InMemoryTokenCachePersistenceBackend {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_entries(entries: Vec<PersistentCapabilityTokenEntry>) -> Self {
+        Self {
+            entries: Arc::new(Mutex::new(entries)),
+        }
+    }
+
+    pub fn entries(&self) -> Result<Vec<PersistentCapabilityTokenEntry>, CapabilityTokenError> {
+        self.load_entries()
+    }
+}
+
+impl TokenCachePersistenceBackend for InMemoryTokenCachePersistenceBackend {
+    fn profile(&self) -> TokenCachePersistenceProfile {
+        TokenCachePersistenceProfile::InMemoryDev
+    }
+
+    fn load_entries(&self) -> Result<Vec<PersistentCapabilityTokenEntry>, CapabilityTokenError> {
+        self.entries
+            .lock()
+            .map(|entries| entries.clone())
+            .map_err(|_| CapabilityTokenError::TokenCachePersistenceUnavailable)
+    }
+
+    fn replace_entries(
+        &self,
+        entries: Vec<PersistentCapabilityTokenEntry>,
+    ) -> Result<(), CapabilityTokenError> {
+        *self
+            .entries
+            .lock()
+            .map_err(|_| CapabilityTokenError::TokenCachePersistenceUnavailable)? = entries;
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TokenCacheRestoreReport {
+    pub backend_profile: TokenCachePersistenceProfile,
+    pub production_ready: bool,
+    pub loaded_count: usize,
+    pub restored_count: usize,
+    pub rejected: Vec<TokenCacheRestoreRejection>,
+    pub redaction: TokenCacheRedaction,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TokenCacheRestoreRejection {
+    pub scope: CapabilityTokenScopeSummary,
+    pub reason: TokenCacheRestoreRejectionReason,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CapabilityTokenScopeSummary {
+    pub skill_id: String,
+    pub has_agent_did: bool,
+    pub has_session_id: bool,
+}
+
+impl From<&CapabilityTokenScope> for CapabilityTokenScopeSummary {
+    fn from(scope: &CapabilityTokenScope) -> Self {
+        Self {
+            skill_id: scope.skill_id.clone(),
+            has_agent_did: scope.agent_did.is_some(),
+            has_session_id: scope.session_id.is_some(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum TokenCacheRestoreRejectionReason {
+    MissingExpiry,
+    Expired,
+    MissingScope,
+    InvalidSignatureOrTrust,
+    ScopeMismatch,
+    Revoked,
+    Replayed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TokenCacheRedaction {
+    pub marker: String,
+    pub policy: String,
+    pub raw_token_visible: bool,
+}
+
+impl Default for TokenCacheRedaction {
+    fn default() -> Self {
+        Self {
+            marker: "[REDACTED]".to_owned(),
+            policy: "dock.token-cache.redaction.v1".to_owned(),
+            raw_token_visible: false,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct PersistentCapabilityTokenCache<B> {
+    backend: B,
+    cache: InMemoryTokenCache,
+}
+
+impl<B> PersistentCapabilityTokenCache<B>
+where
+    B: TokenCachePersistenceBackend,
+{
+    pub fn restore(
+        backend: B,
+        verifier: &CapabilityTokenVerifier,
+        lifecycle: &impl CapabilityTokenLifecycleStore,
+        now_ms: u64,
+    ) -> Result<(Self, TokenCacheRestoreReport), CapabilityTokenError> {
+        let loaded = backend.load_entries()?;
+        let loaded_count = loaded.len();
+        let cache = InMemoryTokenCache::new();
+        let mut restored_entries = Vec::new();
+        let mut rejected = Vec::new();
+
+        for entry in loaded {
+            match restore_entry(&entry, verifier, lifecycle, now_ms) {
+                Ok(()) => {
+                    cache.put(entry.scope.clone(), entry.token());
+                    restored_entries.push(entry);
+                }
+                Err(reason) => rejected.push(TokenCacheRestoreRejection {
+                    scope: CapabilityTokenScopeSummary::from(&entry.scope),
+                    reason,
+                }),
+            }
+        }
+
+        backend.replace_entries(restored_entries.clone())?;
+        let profile = backend.profile();
+        let report = TokenCacheRestoreReport {
+            backend_profile: profile,
+            production_ready: profile.production_ready(),
+            loaded_count,
+            restored_count: restored_entries.len(),
+            rejected,
+            redaction: TokenCacheRedaction::default(),
+        };
+
+        Ok((Self { backend, cache }, report))
+    }
+
+    pub fn try_put(
+        &self,
+        scope: CapabilityTokenScope,
+        token: CapabilityToken,
+    ) -> Result<(), CapabilityTokenError> {
+        let mut entries = self.cache.snapshot_persistent_entries(now_ms());
+        entries.retain(|entry| entry.scope != scope);
+        entries.push(PersistentCapabilityTokenEntry::new(
+            scope.clone(),
+            token.clone(),
+        ));
+        self.backend.replace_entries(entries)?;
+        self.cache.put(scope, token);
+        Ok(())
+    }
+
+    pub fn try_clear(&self, scope: &CapabilityTokenScope) -> Result<(), CapabilityTokenError> {
+        let mut entries = self.cache.snapshot_persistent_entries(now_ms());
+        entries.retain(|entry| &entry.scope != scope);
+        self.backend.replace_entries(entries)?;
+        self.cache.clear(scope);
+        Ok(())
+    }
+
+    pub fn restore_report(
+        &self,
+    ) -> Result<(TokenCachePersistenceProfile, usize), CapabilityTokenError> {
+        Ok((self.backend.profile(), self.backend.load_entries()?.len()))
+    }
+}
+
+impl<B> CapabilityTokenCache for PersistentCapabilityTokenCache<B>
+where
+    B: TokenCachePersistenceBackend,
+{
+    fn get(&self, scope: &CapabilityTokenScope) -> Option<CapabilityToken> {
+        self.cache.get(scope)
+    }
+
+    fn put(&self, scope: CapabilityTokenScope, token: CapabilityToken) {
+        let _ = self.try_put(scope, token);
+    }
+
+    fn clear(&self, scope: &CapabilityTokenScope) {
+        let _ = self.try_clear(scope);
     }
 }
 
@@ -503,6 +898,33 @@ impl CapabilityTokenVerifier {
         validate_expected_claims(&claims, &self.config, expected)?;
         Ok(claims)
     }
+
+    pub fn verify_with_lifecycle_at<S>(
+        &self,
+        token: &str,
+        expected: &ExpectedCapability,
+        lifecycle: &S,
+        mode: CapabilityTokenLifecycleMode,
+        now_ms: u64,
+    ) -> Result<CapabilityTokenClaims, CapabilityTokenError>
+    where
+        S: CapabilityTokenLifecycleStore,
+    {
+        let claims = self.verify_at(token, expected, now_ms)?;
+        if lifecycle.is_revoked(&claims.jti, now_ms)? {
+            return Err(CapabilityTokenError::Revoked);
+        }
+        if mode == CapabilityTokenLifecycleMode::ConsumeOnce {
+            lifecycle.consume_jti_once(&claims.jti, claims.expires_at_ms(), now_ms)?;
+        }
+        Ok(claims)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CapabilityTokenLifecycleMode {
+    CheckOnly,
+    ConsumeOnce,
 }
 
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
@@ -539,6 +961,18 @@ pub enum CapabilityTokenError {
 
     #[error("capability token version is unsupported")]
     UnsupportedVersion,
+
+    #[error("capability token has been revoked")]
+    Revoked,
+
+    #[error("capability token replay was detected")]
+    Replayed,
+
+    #[error("capability token lifecycle store is unavailable")]
+    LifecycleUnavailable,
+
+    #[error("capability token persistence backend is unavailable")]
+    TokenCachePersistenceUnavailable,
 }
 
 pub fn bearer_token_expiry_ms(token: &str) -> Option<u64> {
@@ -653,6 +1087,93 @@ fn validate_expected_claims(
     Ok(())
 }
 
+fn restore_entry(
+    entry: &PersistentCapabilityTokenEntry,
+    verifier: &CapabilityTokenVerifier,
+    lifecycle: &impl CapabilityTokenLifecycleStore,
+    now_ms: u64,
+) -> Result<(), TokenCacheRestoreRejectionReason> {
+    let Some(expires_at_ms) = entry.expires_at_ms else {
+        return Err(TokenCacheRestoreRejectionReason::MissingExpiry);
+    };
+    if expires_at_ms <= now_ms {
+        return Err(TokenCacheRestoreRejectionReason::Expired);
+    }
+
+    let claims = decode_token_for_restore(&entry.token().value)
+        .map_err(|_| TokenCacheRestoreRejectionReason::InvalidSignatureOrTrust)?;
+    if entry.issuer != claims.iss || entry.audience != claims.aud || entry.jti != claims.jti {
+        return Err(TokenCacheRestoreRejectionReason::InvalidSignatureOrTrust);
+    }
+    if claims.scope() != entry.scope {
+        return Err(TokenCacheRestoreRejectionReason::ScopeMismatch);
+    }
+    let Some(required_scope) = claims
+        .scopes
+        .first()
+        .filter(|scope| !scope.trim().is_empty())
+    else {
+        return Err(TokenCacheRestoreRejectionReason::MissingScope);
+    };
+    let expected = ExpectedCapability::new(
+        claims.iss.clone(),
+        claims.aud.clone(),
+        claims.merchant_did.clone(),
+        ExpectedCapabilitySubject::new(
+            claims.user_did.clone(),
+            claims.agent_did.clone(),
+            claims.session_id.clone(),
+        ),
+        claims.skill_id.clone(),
+        required_scope.clone(),
+    );
+    let verified = verifier
+        .verify_at(&entry.token().value, &expected, now_ms)
+        .map_err(map_restore_verify_error)?;
+    if verified.scope() != entry.scope {
+        return Err(TokenCacheRestoreRejectionReason::ScopeMismatch);
+    }
+    if lifecycle
+        .is_revoked(&verified.jti, now_ms)
+        .map_err(|_| TokenCacheRestoreRejectionReason::InvalidSignatureOrTrust)?
+    {
+        return Err(TokenCacheRestoreRejectionReason::Revoked);
+    }
+    if lifecycle
+        .is_consumed_once(&verified.jti, now_ms)
+        .map_err(|_| TokenCacheRestoreRejectionReason::InvalidSignatureOrTrust)?
+    {
+        return Err(TokenCacheRestoreRejectionReason::Replayed);
+    }
+    Ok(())
+}
+
+fn decode_token_for_restore(token: &str) -> Result<CapabilityTokenClaims, CapabilityTokenError> {
+    if token.trim().is_empty() || token.starts_with("demo-cap-") {
+        return Err(CapabilityTokenError::Malformed);
+    }
+    let mut validation = Validation::new(Algorithm::HS256);
+    validation.insecure_disable_signature_validation();
+    validation.validate_exp = false;
+    validation.validate_nbf = false;
+    validation.validate_aud = false;
+    validation.required_spec_claims.clear();
+    decode::<CapabilityTokenClaims>(token, &DecodingKey::from_secret(&[]), &validation)
+        .map(|data| data.claims)
+        .map_err(|_| CapabilityTokenError::Malformed)
+}
+
+fn map_restore_verify_error(error: CapabilityTokenError) -> TokenCacheRestoreRejectionReason {
+    match error {
+        CapabilityTokenError::Expired => TokenCacheRestoreRejectionReason::Expired,
+        CapabilityTokenError::MissingScope => TokenCacheRestoreRejectionReason::MissingScope,
+        CapabilityTokenError::ScopeMismatch => TokenCacheRestoreRejectionReason::ScopeMismatch,
+        CapabilityTokenError::Revoked => TokenCacheRestoreRejectionReason::Revoked,
+        CapabilityTokenError::Replayed => TokenCacheRestoreRejectionReason::Replayed,
+        _ => TokenCacheRestoreRejectionReason::InvalidSignatureOrTrust,
+    }
+}
+
 fn generate_jti() -> String {
     let mut bytes = [0_u8; 16];
     rand::thread_rng().fill_bytes(&mut bytes);
@@ -660,6 +1181,17 @@ fn generate_jti() -> String {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>()
+}
+
+fn prune_state(state: &mut TokenLifecycleState, now_ms: u64) -> usize {
+    let before = state.revoked.len() + state.seen_once.len();
+    state
+        .revoked
+        .retain(|_, expires_at_ms| *expires_at_ms > now_ms);
+    state
+        .seen_once
+        .retain(|_, expires_at_ms| *expires_at_ms > now_ms);
+    before.saturating_sub(state.revoked.len() + state.seen_once.len())
 }
 
 #[cfg(test)]
@@ -1002,6 +1534,358 @@ mod tests {
         );
     }
 
+    #[test]
+    fn token_claims_record_version_and_scope_derivation_source() {
+        let issuer = issuer();
+        let outcome = issuer
+            .issue_at(request(), 1_780_000_000_000)
+            .expect("token issues");
+
+        assert_eq!(outcome.claims.version, CAPABILITY_TOKEN_VERSION);
+        assert_eq!(
+            CAPABILITY_TOKEN_SCOPE_DERIVATION_SOURCE,
+            "CapabilityTokenRequest merchant_did/user_did/agent_did/skill_id/session_id/scopes"
+        );
+        assert_eq!(outcome.claims.scopes, request().scopes);
+    }
+
+    #[test]
+    fn lifecycle_store_rejects_revoked_token() {
+        let issuer = issuer();
+        let verifier = verifier();
+        let lifecycle = InMemoryTokenLifecycleStore::new();
+        let outcome = issuer
+            .issue_at(request(), 1_780_000_000_000)
+            .expect("token issues");
+
+        lifecycle
+            .revoke_jti(&outcome.claims.jti, outcome.claims.expires_at_ms())
+            .expect("jti revokes");
+
+        let error = verifier
+            .verify_with_lifecycle_at(
+                &outcome.token.value,
+                &expected("coffee:drinks:read"),
+                &lifecycle,
+                CapabilityTokenLifecycleMode::CheckOnly,
+                1_780_000_001_000,
+            )
+            .expect_err("revoked token fails");
+
+        assert_eq!(error, CapabilityTokenError::Revoked);
+    }
+
+    #[test]
+    fn lifecycle_store_can_consume_jti_once_for_replay_sensitive_routes() {
+        let issuer = issuer();
+        let verifier = verifier();
+        let lifecycle = InMemoryTokenLifecycleStore::new();
+        let outcome = issuer
+            .issue_at(request(), 1_780_000_000_000)
+            .expect("token issues");
+
+        verifier
+            .verify_with_lifecycle_at(
+                &outcome.token.value,
+                &expected("coffee:order:confirm"),
+                &lifecycle,
+                CapabilityTokenLifecycleMode::ConsumeOnce,
+                1_780_000_001_000,
+            )
+            .expect("first use verifies");
+        let error = verifier
+            .verify_with_lifecycle_at(
+                &outcome.token.value,
+                &expected("coffee:order:confirm"),
+                &lifecycle,
+                CapabilityTokenLifecycleMode::ConsumeOnce,
+                1_780_000_002_000,
+            )
+            .expect_err("replay fails");
+
+        assert_eq!(error, CapabilityTokenError::Replayed);
+    }
+
+    #[test]
+    fn lifecycle_store_prunes_expired_revocation_and_replay_entries() {
+        let lifecycle = InMemoryTokenLifecycleStore::new();
+        lifecycle.revoke_jti("revoked-jti", 1_000).expect("revokes");
+        lifecycle
+            .consume_jti_once("seen-jti", 2_000, 500)
+            .expect("consumes");
+
+        assert_eq!(lifecycle.prune_expired(2_000).expect("prunes"), 2);
+        assert!(!lifecycle
+            .is_revoked("revoked-jti", 2_000)
+            .expect("checks revoked"));
+        assert_eq!(lifecycle.consume_jti_once("seen-jti", 3_000, 2_000), Ok(()));
+    }
+
+    #[test]
+    fn token_cache_persistence_restores_valid_entries_and_persists_snapshot() {
+        let issuer = issuer();
+        let verifier = verifier();
+        let lifecycle = InMemoryTokenLifecycleStore::new();
+        let base_ms = token_cache_test_base_ms();
+        let outcome = issuer.issue_at(request(), base_ms).expect("token issues");
+        let scope = outcome.claims.scope();
+        let backend = InMemoryTokenCachePersistenceBackend::with_entries(vec![
+            PersistentCapabilityTokenEntry::new(scope.clone(), outcome.token.clone()),
+        ]);
+
+        let (cache, report) = PersistentCapabilityTokenCache::restore(
+            backend.clone(),
+            &verifier,
+            &lifecycle,
+            base_ms + 1_000,
+        )
+        .expect("cache restores");
+
+        assert_eq!(
+            report.backend_profile,
+            TokenCachePersistenceProfile::InMemoryDev
+        );
+        assert!(!report.production_ready);
+        assert_eq!(report.loaded_count, 1);
+        assert_eq!(report.restored_count, 1);
+        assert!(report.rejected.is_empty());
+        assert_eq!(cache.get(&scope), Some(outcome.token.clone()));
+        assert_eq!(backend.entries().expect("entries").len(), 1);
+
+        let new_outcome = issuer
+            .issue_at(request(), base_ms + 10_000)
+            .expect("new token issues");
+        cache
+            .try_put(scope.clone(), new_outcome.token.clone())
+            .expect("snapshot persists");
+        assert_eq!(
+            backend
+                .entries()
+                .expect("entries")
+                .first()
+                .map(PersistentCapabilityTokenEntry::token),
+            Some(new_outcome.token)
+        );
+    }
+
+    #[test]
+    fn token_cache_persistence_rejects_expired_entries() {
+        let issuer = issuer();
+        let verifier = verifier();
+        let lifecycle = InMemoryTokenLifecycleStore::new();
+        let base_ms = token_cache_test_base_ms();
+        let outcome = issuer.issue_at(request(), base_ms).expect("token issues");
+        let backend = InMemoryTokenCachePersistenceBackend::with_entries(vec![
+            PersistentCapabilityTokenEntry::new(outcome.claims.scope(), outcome.token),
+        ]);
+
+        let (_cache, report) = PersistentCapabilityTokenCache::restore(
+            backend.clone(),
+            &verifier,
+            &lifecycle,
+            base_ms + 301_000,
+        )
+        .expect("cache restore rejects expired");
+
+        assert_eq!(report.loaded_count, 1);
+        assert_eq!(report.restored_count, 0);
+        assert_eq!(
+            report.rejected[0].reason,
+            TokenCacheRestoreRejectionReason::Expired
+        );
+        assert!(backend.entries().expect("entries").is_empty());
+    }
+
+    #[test]
+    fn token_cache_persistence_rejects_revoked_entries() {
+        let issuer = issuer();
+        let verifier = verifier();
+        let lifecycle = InMemoryTokenLifecycleStore::new();
+        let base_ms = token_cache_test_base_ms();
+        let outcome = issuer.issue_at(request(), base_ms).expect("token issues");
+        lifecycle
+            .revoke_jti(&outcome.claims.jti, outcome.claims.expires_at_ms())
+            .expect("jti revokes");
+        let backend = InMemoryTokenCachePersistenceBackend::with_entries(vec![
+            PersistentCapabilityTokenEntry::new(outcome.claims.scope(), outcome.token),
+        ]);
+
+        let (_cache, report) = PersistentCapabilityTokenCache::restore(
+            backend,
+            &verifier,
+            &lifecycle,
+            base_ms + 1_000,
+        )
+        .expect("cache restore rejects revoked");
+
+        assert_eq!(report.restored_count, 0);
+        assert_eq!(
+            report.rejected[0].reason,
+            TokenCacheRestoreRejectionReason::Revoked
+        );
+    }
+
+    #[test]
+    fn token_cache_persistence_rejects_replayed_entries() {
+        let issuer = issuer();
+        let verifier = verifier();
+        let lifecycle = InMemoryTokenLifecycleStore::new();
+        let base_ms = token_cache_test_base_ms();
+        let outcome = issuer.issue_at(request(), base_ms).expect("token issues");
+        lifecycle
+            .consume_jti_once(
+                &outcome.claims.jti,
+                outcome.claims.expires_at_ms(),
+                base_ms + 1_000,
+            )
+            .expect("jti consumes");
+        let backend = InMemoryTokenCachePersistenceBackend::with_entries(vec![
+            PersistentCapabilityTokenEntry::new(outcome.claims.scope(), outcome.token),
+        ]);
+
+        let (_cache, report) = PersistentCapabilityTokenCache::restore(
+            backend,
+            &verifier,
+            &lifecycle,
+            base_ms + 2_000,
+        )
+        .expect("cache restore rejects replayed");
+
+        assert_eq!(report.restored_count, 0);
+        assert_eq!(
+            report.rejected[0].reason,
+            TokenCacheRestoreRejectionReason::Replayed
+        );
+    }
+
+    #[test]
+    fn token_cache_persistence_rejects_scope_mismatch_entries() {
+        let issuer = issuer();
+        let verifier = verifier();
+        let lifecycle = InMemoryTokenLifecycleStore::new();
+        let base_ms = token_cache_test_base_ms();
+        let outcome = issuer.issue_at(request(), base_ms).expect("token issues");
+        let wrong_scope = CapabilityTokenScope::for_subject(
+            "did:wba:merchant.example",
+            "did:wba:user.example",
+            Some("did:wba:agent.example".to_owned()),
+            "tea",
+            Some("session-1".to_owned()),
+        );
+        let backend = InMemoryTokenCachePersistenceBackend::with_entries(vec![
+            PersistentCapabilityTokenEntry::new(wrong_scope, outcome.token),
+        ]);
+
+        let (_cache, report) = PersistentCapabilityTokenCache::restore(
+            backend,
+            &verifier,
+            &lifecycle,
+            base_ms + 1_000,
+        )
+        .expect("cache restore rejects mismatch");
+
+        assert_eq!(report.restored_count, 0);
+        assert_eq!(
+            report.rejected[0].reason,
+            TokenCacheRestoreRejectionReason::ScopeMismatch
+        );
+        assert_eq!(report.rejected[0].scope.skill_id, "tea");
+    }
+
+    #[test]
+    fn token_cache_persistence_rejects_metadata_trust_mismatch_entries() {
+        let issuer = issuer();
+        let verifier = verifier();
+        let lifecycle = InMemoryTokenLifecycleStore::new();
+        let base_ms = token_cache_test_base_ms();
+        let outcome = issuer.issue_at(request(), base_ms).expect("token issues");
+        let mut entry = PersistentCapabilityTokenEntry::new(outcome.claims.scope(), outcome.token);
+        entry.issuer = "did:wba:attacker.example".to_owned();
+        let backend = InMemoryTokenCachePersistenceBackend::with_entries(vec![entry]);
+
+        let (_cache, report) = PersistentCapabilityTokenCache::restore(
+            backend,
+            &verifier,
+            &lifecycle,
+            base_ms + 1_000,
+        )
+        .expect("cache restore rejects trust mismatch");
+
+        assert_eq!(report.restored_count, 0);
+        assert_eq!(
+            report.rejected[0].reason,
+            TokenCacheRestoreRejectionReason::InvalidSignatureOrTrust
+        );
+    }
+
+    #[test]
+    fn token_cache_persistence_report_and_debug_redact_raw_token() {
+        let issuer = issuer();
+        let verifier = verifier();
+        let lifecycle = InMemoryTokenLifecycleStore::new();
+        let base_ms = token_cache_test_base_ms();
+        let outcome = issuer.issue_at(request(), base_ms).expect("token issues");
+        let entry =
+            PersistentCapabilityTokenEntry::new(outcome.claims.scope(), outcome.token.clone());
+        let entry_debug = format!("{entry:?}");
+        assert!(!entry_debug.contains(&outcome.token.value));
+        assert!(!entry_debug.contains(&outcome.claims.jti));
+        assert!(entry_debug.contains("[REDACTED]"));
+
+        let backend = InMemoryTokenCachePersistenceBackend::with_entries(vec![entry]);
+        let (_cache, report) = PersistentCapabilityTokenCache::restore(
+            backend,
+            &verifier,
+            &lifecycle,
+            base_ms + 1_000,
+        )
+        .expect("cache restores");
+        let report_json = serde_json::to_string(&report).expect("report serializes");
+        assert!(!report_json.contains(&outcome.token.value));
+        assert!(!report_json.contains("Authorization"));
+        assert!(!report_json.contains(test_secret()));
+        assert!(!report_json.contains("private"));
+        assert!(!report_json.contains("signature"));
+        assert!(!report.redaction.raw_token_visible);
+    }
+
+    #[test]
+    fn token_cache_persistence_marks_in_memory_backend_dev_only() {
+        assert!(!TokenCachePersistenceProfile::InMemoryDev.production_ready());
+        assert!(TokenCachePersistenceProfile::HostSecureStore.production_ready());
+        assert!(TokenCachePersistenceProfile::EncryptedBackend.production_ready());
+
+        let backend = InMemoryTokenCachePersistenceBackend::new();
+        assert_eq!(backend.profile(), TokenCachePersistenceProfile::InMemoryDev);
+    }
+
+    #[test]
+    fn token_cache_persistence_try_put_fails_before_memory_update() {
+        let issuer = issuer();
+        let verifier = verifier();
+        let lifecycle = InMemoryTokenLifecycleStore::new();
+        let base_ms = token_cache_test_base_ms();
+        let outcome = issuer.issue_at(request(), base_ms).expect("token issues");
+        let scope = outcome.claims.scope();
+        let (cache, _report) = PersistentCapabilityTokenCache::restore(
+            FailingTokenCachePersistenceBackend,
+            &verifier,
+            &lifecycle,
+            base_ms + 1_000,
+        )
+        .expect("empty restore succeeds");
+
+        let error = cache
+            .try_put(scope.clone(), outcome.token)
+            .expect_err("backend failure blocks put");
+
+        assert_eq!(
+            error,
+            CapabilityTokenError::TokenCachePersistenceUnavailable
+        );
+        assert!(cache.get(&scope).is_none());
+    }
+
     fn issuer() -> CapabilityTokenIssuer {
         CapabilityTokenIssuer::new(
             CapabilityTokenIssuerConfig::new(
@@ -1051,5 +1935,35 @@ mod tests {
 
     fn test_secret() -> &'static str {
         "test-only-capability-token-secret-do-not-use-in-production"
+    }
+
+    fn token_cache_test_base_ms() -> u64 {
+        now_ms().saturating_add(60_000)
+    }
+
+    #[derive(Clone)]
+    struct FailingTokenCachePersistenceBackend;
+
+    impl TokenCachePersistenceBackend for FailingTokenCachePersistenceBackend {
+        fn profile(&self) -> TokenCachePersistenceProfile {
+            TokenCachePersistenceProfile::EncryptedBackend
+        }
+
+        fn load_entries(
+            &self,
+        ) -> Result<Vec<PersistentCapabilityTokenEntry>, CapabilityTokenError> {
+            Ok(Vec::new())
+        }
+
+        fn replace_entries(
+            &self,
+            entries: Vec<PersistentCapabilityTokenEntry>,
+        ) -> Result<(), CapabilityTokenError> {
+            if entries.is_empty() {
+                Ok(())
+            } else {
+                Err(CapabilityTokenError::TokenCachePersistenceUnavailable)
+            }
+        }
     }
 }

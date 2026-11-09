@@ -1,0 +1,33 @@
+{
+  "schemaVersion": "dock.test-skill-report.v1",
+  "status": "ok",
+  "commandStatus": "ok",
+  "skillId": "address-form",
+  "fixtureSet": "address-form",
+  "mockProvider": {
+    "status": "dev-only",
+    "productionReady": false
+  },
+  "summary": {
+    "total": 1,
+    "failed": 0
+  },
+  "cases": [
+    {
+      "name": "address-form.prepareAddressForm",
+      "status": "pass",
+      "apiName": "prepareAddressForm",
+      "componentPath": "components/address-form/index",
+      "snapshot": "testdata/render-ir/address-form.prepareAddressForm.json",
+      "snapshotStatus": "match",
+      "auditBoundary": "host-provider-consent-required",
+      "riskLevel": "L4",
+      "dataPolicy": "opaque-address-handle-only"
+    }
+  ],
+  "riskNotes": [
+    "mock-only compatibility fixture",
+    "uses opaque address handle only",
+    "production Host provider and ConsentGate review are required"
+  ]
+}

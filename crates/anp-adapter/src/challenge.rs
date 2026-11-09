@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::BTreeMap;
 use std::fmt;
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 use thiserror::Error;
 
@@ -131,6 +132,17 @@ pub trait DidDocumentResolver {
     fn resolve_did_document(&self, did: &str) -> Result<Value, ChallengeProofError>;
 }
 
+pub trait ChallengeNonceStore {
+    fn consume_nonce_once(
+        &self,
+        challenge_id: &str,
+        nonce: &str,
+        expires_at_ms: u64,
+        now_ms: u64,
+    ) -> Result<(), ChallengeProofError>;
+    fn prune_expired(&self, now_ms: u64) -> Result<usize, ChallengeProofError>;
+}
+
 impl<F> DidDocumentResolver for F
 where
     F: Fn(&str) -> Result<Value, ChallengeProofError>,
@@ -166,6 +178,171 @@ impl DidDocumentResolver for StaticDidDocumentResolver {
             return Err(ChallengeProofError::DidDocumentMismatch);
         }
         Ok(self.did_document.clone())
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct InMemoryChallengeNonceStore {
+    consumed: Arc<Mutex<BTreeMap<String, u64>>>,
+}
+
+impl InMemoryChallengeNonceStore {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
+impl ChallengeNonceStore for InMemoryChallengeNonceStore {
+    fn consume_nonce_once(
+        &self,
+        challenge_id: &str,
+        nonce: &str,
+        expires_at_ms: u64,
+        now_ms: u64,
+    ) -> Result<(), ChallengeProofError> {
+        if challenge_id.trim().is_empty() || nonce.trim().is_empty() || expires_at_ms <= now_ms {
+            return Err(ChallengeProofError::InvalidPayload);
+        }
+        let mut consumed = self
+            .consumed
+            .lock()
+            .map_err(|_| ChallengeProofError::ReplayStoreUnavailable)?;
+        prune_nonce_state(&mut consumed, now_ms);
+        let key = nonce_store_key(challenge_id, nonce);
+        if consumed.contains_key(&key) {
+            return Err(ChallengeProofError::ReplayDetected);
+        }
+        consumed.insert(key, expires_at_ms);
+        Ok(())
+    }
+
+    fn prune_expired(&self, now_ms: u64) -> Result<usize, ChallengeProofError> {
+        let mut consumed = self
+            .consumed
+            .lock()
+            .map_err(|_| ChallengeProofError::ReplayStoreUnavailable)?;
+        Ok(prune_nonce_state(&mut consumed, now_ms))
+    }
+}
+
+#[derive(Clone)]
+pub struct TrustedDidDocumentResolver<R> {
+    upstream: R,
+    trust_anchors: BTreeMap<String, Value>,
+    cache: Arc<Mutex<BTreeMap<String, CachedDidDocument>>>,
+    ttl_ms: u64,
+}
+
+#[derive(Debug, Clone)]
+struct CachedDidDocument {
+    document: Value,
+    expires_at_ms: u64,
+}
+
+impl<R> TrustedDidDocumentResolver<R>
+where
+    R: DidDocumentResolver,
+{
+    pub fn new(upstream: R, trust_anchors: BTreeMap<String, Value>, ttl_ms: u64) -> Self {
+        Self {
+            upstream,
+            trust_anchors,
+            cache: Arc::new(Mutex::new(BTreeMap::new())),
+            ttl_ms,
+        }
+    }
+
+    pub fn resolve_did_document_at(
+        &self,
+        did: &str,
+        now_ms: u64,
+    ) -> Result<Value, ChallengeProofError> {
+        self.resolve_trusted_document(did, now_ms)
+    }
+
+    fn resolve_trusted_document(
+        &self,
+        did: &str,
+        now_ms: u64,
+    ) -> Result<Value, ChallengeProofError> {
+        if did.trim().is_empty() || !self.trust_anchors.contains_key(did) || self.ttl_ms == 0 {
+            return Err(ChallengeProofError::DidDocumentResolution);
+        }
+        if let Some(cached) = self.cached_document(did, now_ms)? {
+            return Ok(cached);
+        }
+
+        let document = self.upstream.resolve_did_document(did)?;
+        self.validate_anchor(did, &document)?;
+        let expires_at_ms = now_ms.saturating_add(self.ttl_ms);
+        let mut cache = self
+            .cache
+            .lock()
+            .map_err(|_| ChallengeProofError::DidDocumentResolution)?;
+        cache.insert(
+            did.to_owned(),
+            CachedDidDocument {
+                document: document.clone(),
+                expires_at_ms,
+            },
+        );
+        Ok(document)
+    }
+
+    fn cached_document(
+        &self,
+        did: &str,
+        now_ms: u64,
+    ) -> Result<Option<Value>, ChallengeProofError> {
+        let mut cache = self
+            .cache
+            .lock()
+            .map_err(|_| ChallengeProofError::DidDocumentResolution)?;
+        let Some(cached) = cache.get(did).cloned() else {
+            return Ok(None);
+        };
+        if cached.expires_at_ms <= now_ms {
+            cache.remove(did);
+            return Ok(None);
+        }
+        self.validate_anchor(did, &cached.document)?;
+        Ok(Some(cached.document))
+    }
+
+    fn validate_anchor(&self, did: &str, document: &Value) -> Result<(), ChallengeProofError> {
+        let anchor = self
+            .trust_anchors
+            .get(did)
+            .ok_or(ChallengeProofError::DidDocumentResolution)?;
+        if did_from_document(document)? != did || did_from_document(anchor)? != did {
+            return Err(ChallengeProofError::DidDocumentMismatch);
+        }
+        if document != anchor {
+            return Err(ChallengeProofError::DidDocumentMismatch);
+        }
+        Ok(())
+    }
+}
+
+impl<R> fmt::Debug for TrustedDidDocumentResolver<R> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("TrustedDidDocumentResolver")
+            .field(
+                "trusted_dids",
+                &self.trust_anchors.keys().collect::<Vec<_>>(),
+            )
+            .field("ttl_ms", &self.ttl_ms)
+            .finish()
+    }
+}
+
+impl<R> DidDocumentResolver for TrustedDidDocumentResolver<R>
+where
+    R: DidDocumentResolver,
+{
+    fn resolve_did_document(&self, did: &str) -> Result<Value, ChallengeProofError> {
+        self.resolve_trusted_document(did, current_time_ms()?)
     }
 }
 
@@ -236,6 +413,12 @@ pub enum ChallengeProofError {
 
     #[error("resolved DID document does not match signer DID")]
     DidDocumentMismatch,
+
+    #[error("challenge proof replay was detected")]
+    ReplayDetected,
+
+    #[error("challenge replay store is unavailable")]
+    ReplayStoreUnavailable,
 }
 
 pub fn sign_challenge_proof<P>(
@@ -364,6 +547,28 @@ where
         key_id: verified_metadata.keyid,
         auth_scheme: proof.proof_type.as_str().to_owned(),
     })
+}
+
+pub fn verify_challenge_proof_at_with_resolver_and_nonce_store<R, S>(
+    proof: &DockDidChallengeProof,
+    expected_payload: &ChallengeProofPayload,
+    resolver: &R,
+    nonce_store: &S,
+    now_ms: u64,
+) -> Result<VerifiedChallengeProof, ChallengeProofError>
+where
+    R: DidDocumentResolver,
+    S: ChallengeNonceStore,
+{
+    let verified =
+        verify_challenge_proof_at_with_resolver(proof, expected_payload, resolver, now_ms)?;
+    nonce_store.consume_nonce_once(
+        &expected_payload.challenge_id,
+        &expected_payload.nonce,
+        expected_payload.expires_at_ms,
+        now_ms,
+    )?;
+    Ok(verified)
 }
 
 fn validate_payload(payload: &ChallengeProofPayload) -> Result<(), ChallengeProofError> {
@@ -507,6 +712,16 @@ fn current_time_ms() -> Result<u64, ChallengeProofError> {
     u64::try_from(millis).map_err(|_| ChallengeProofError::InvalidTimestamp)
 }
 
+fn nonce_store_key(challenge_id: &str, nonce: &str) -> String {
+    format!("{challenge_id}\u{1f}{nonce}")
+}
+
+fn prune_nonce_state(consumed: &mut BTreeMap<String, u64>, now_ms: u64) -> usize {
+    let before = consumed.len();
+    consumed.retain(|_, expires_at_ms| *expires_at_ms > now_ms);
+    before.saturating_sub(consumed.len())
+}
+
 fn map_signing_error(error: HttpSignatureError) -> ChallengeProofError {
     match error {
         HttpSignatureError::VerificationMethodNotFound => ChallengeProofError::InvalidDidDocument,
@@ -552,8 +767,10 @@ mod tests {
     use super::*;
     use anp::authentication::{create_did_wba_document, DidDocumentOptions};
     use serde_json::json;
+    use std::collections::BTreeMap;
     use std::fs;
     use std::path::{Path, PathBuf};
+    use std::sync::{Arc, Mutex};
 
     #[test]
     fn challenge_login_contract_is_camel_case() {
@@ -775,6 +992,123 @@ mod tests {
         assert!(!debug.contains(secret_path.to_string_lossy().as_ref()));
     }
 
+    #[test]
+    fn challenge_nonce_store_rejects_replayed_proof() {
+        let fixture = DidFixture::new("user.example");
+        let session = fixture.session();
+        let payload = fixture.payload();
+        let provider = fixture.provider();
+        let proof = sign_challenge_proof(&payload, &provider, &session, AuthMode::HttpSignatures)
+            .expect("proof signs");
+        let resolver = StaticDidDocumentResolver::new(fixture.did_document.clone());
+        let nonce_store = InMemoryChallengeNonceStore::new();
+
+        verify_challenge_proof_at_with_resolver_and_nonce_store(
+            &proof,
+            &payload,
+            &resolver,
+            &nonce_store,
+            payload.issued_at_ms + 1_000,
+        )
+        .expect("first proof verifies");
+        let replay = verify_challenge_proof_at_with_resolver_and_nonce_store(
+            &proof,
+            &payload,
+            &resolver,
+            &nonce_store,
+            payload.issued_at_ms + 2_000,
+        )
+        .expect_err("replayed nonce fails");
+
+        assert_eq!(replay, ChallengeProofError::ReplayDetected);
+    }
+
+    #[test]
+    fn challenge_nonce_store_prunes_expired_entries() {
+        let store = InMemoryChallengeNonceStore::new();
+        store
+            .consume_nonce_once("challenge-1", "nonce-1", 2_000, 1_000)
+            .expect("nonce consumes");
+
+        assert_eq!(store.prune_expired(2_000).expect("prunes"), 1);
+        assert_eq!(
+            store.consume_nonce_once("challenge-1", "nonce-1", 3_000, 2_000),
+            Ok(())
+        );
+    }
+
+    #[test]
+    fn trusted_resolver_uses_trust_anchor_and_cache_ttl() {
+        let fixture = DidFixture::new("user.example");
+        let did = fixture.did();
+        let upstream = MutableResolver::new(Ok(fixture.did_document.clone()));
+        let resolver = TrustedDidDocumentResolver::new(
+            upstream.clone(),
+            BTreeMap::from([(did.clone(), fixture.did_document.clone())]),
+            1_000,
+        );
+
+        let first = resolver
+            .resolve_did_document_at(&did, 10_000)
+            .expect("trusted document resolves");
+        assert_eq!(first["id"], did);
+        upstream.set(Err(ChallengeProofError::DidDocumentResolution));
+
+        let cached = resolver
+            .resolve_did_document_at(&did, 10_500)
+            .expect("cache hit survives upstream failure");
+        assert_eq!(cached["id"], did);
+        let expired = resolver
+            .resolve_did_document_at(&did, 11_001)
+            .expect_err("expired cache fails closed when upstream fails");
+        assert_eq!(expired, ChallengeProofError::DidDocumentResolution);
+    }
+
+    #[test]
+    fn trusted_resolver_rejects_unknown_or_mismatched_did_documents() {
+        let fixture = DidFixture::new("user.example");
+        let wrong_fixture = DidFixture::new("wrong-user.example");
+        let did = fixture.did();
+        let resolver = TrustedDidDocumentResolver::new(
+            StaticDidDocumentResolver::new(fixture.did_document.clone()),
+            BTreeMap::new(),
+            1_000,
+        );
+
+        assert_eq!(
+            resolver.resolve_did_document_at(&did, 10_000),
+            Err(ChallengeProofError::DidDocumentResolution)
+        );
+
+        let resolver = TrustedDidDocumentResolver::new(
+            StaticDidDocumentResolver::new(wrong_fixture.did_document),
+            BTreeMap::from([(did.clone(), fixture.did_document)]),
+            1_000,
+        );
+        assert_eq!(
+            resolver.resolve_did_document_at(&did, 10_000),
+            Err(ChallengeProofError::DidDocumentMismatch)
+        );
+    }
+
+    #[test]
+    fn trusted_resolver_rejects_document_drift_for_same_did() {
+        let fixture = DidFixture::new("user.example");
+        let did = fixture.did();
+        let mut drifted = fixture.did_document.clone();
+        drifted["service"] = json!([{"id": "#unexpected"}]);
+        let resolver = TrustedDidDocumentResolver::new(
+            StaticDidDocumentResolver::new(drifted),
+            BTreeMap::from([(did.clone(), fixture.did_document)]),
+            1_000,
+        );
+
+        assert_eq!(
+            resolver.resolve_did_document_at(&did, 10_000),
+            Err(ChallengeProofError::DidDocumentMismatch)
+        );
+    }
+
     fn payload_with_nonce(payload: &ChallengeProofPayload, nonce: &str) -> ChallengeProofPayload {
         let mut payload = payload.clone();
         payload.nonce = nonce.to_owned();
@@ -843,6 +1177,29 @@ mod tests {
             url: payload.audience.clone(),
             headers,
             payload: payload.clone(),
+        }
+    }
+
+    #[derive(Clone)]
+    struct MutableResolver {
+        result: Arc<Mutex<Result<Value, ChallengeProofError>>>,
+    }
+
+    impl MutableResolver {
+        fn new(result: Result<Value, ChallengeProofError>) -> Self {
+            Self {
+                result: Arc::new(Mutex::new(result)),
+            }
+        }
+
+        fn set(&self, result: Result<Value, ChallengeProofError>) {
+            *self.result.lock().expect("resolver mutex") = result;
+        }
+    }
+
+    impl DidDocumentResolver for MutableResolver {
+        fn resolve_did_document(&self, _did: &str) -> Result<Value, ChallengeProofError> {
+            self.result.lock().expect("resolver mutex").clone()
         }
     }
 

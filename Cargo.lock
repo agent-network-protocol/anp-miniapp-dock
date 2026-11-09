@@ -407,6 +407,7 @@ dependencies = [
  "rquickjs",
  "serde",
  "serde_json",
+ "wx-compat",
 ]
 
 [[package]]
@@ -565,6 +566,7 @@ dependencies = [
  "skill-loader",
  "thiserror 1.0.69",
  "tokio",
+ "wx-compat",
 ]
 
 [[package]]
@@ -575,6 +577,7 @@ dependencies = [
  "mcp-schema",
  "serde",
  "serde_json",
+ "sha2",
  "skill-loader",
  "thiserror 1.0.69",
 ]
@@ -1097,6 +1100,7 @@ dependencies = [
  "serde_json",
  "skill-loader",
  "thiserror 1.0.69",
+ "wx-compat",
 ]
 
 [[package]]
@@ -1928,7 +1932,9 @@ name = "skill-loader"
 version = "0.1.0"
 dependencies = [
  "mcp-schema",
+ "serde",
  "serde_json",
+ "sha2",
  "thiserror 1.0.69",
 ]
 

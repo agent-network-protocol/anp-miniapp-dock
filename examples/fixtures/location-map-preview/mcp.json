@@ -1,0 +1,46 @@
+{
+  "apis": [
+    {
+      "name": "prepareLocationMap",
+      "description": "Prepare a static map preview from an opaque Host location handle",
+      "_meta": {
+        "ui": {
+          "componentPath": "components/location-map-preview/index"
+        },
+        "anp": {
+          "risk": "l4"
+        }
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "locationToken": {
+            "type": "string",
+            "description": "Opaque Host location handle"
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "location": {
+            "type": "object"
+          }
+        },
+        "required": ["location"]
+      }
+    }
+  ],
+  "components": [
+    {
+      "path": "components/location-map-preview/index",
+      "relatedPage": {
+        "path": "pages/location/preview",
+        "query": {
+          "fixture": "location-map-preview"
+        }
+      }
+    }
+  ]
+}
+

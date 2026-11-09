@@ -3,7 +3,7 @@ use anp_adapter::{
     redact_for_log, AnpHttpClient, AnpRequestBroker, AnpRequestError, CapabilityTokenCache,
     CapabilityTokenIssuer, CapabilityTokenIssuerConfig, CapabilityTokenRequest, DidCredential,
     DidCredentialError, DidCredentialProvider, HttpTransport, IdentitySession, InMemoryTokenCache,
-    SignedRequestPolicy, TransportRequest, TransportResponse,
+    NetworkAllowlistRule, SignedRequestPolicy, TransportRequest, TransportResponse,
 };
 use serde_json::json;
 use std::cell::RefCell;
@@ -45,6 +45,127 @@ fn empty_allowlist_denies_by_default() {
         .expect_err("default policy must deny network");
 
     assert!(matches!(error, AnpRequestError::Denied(_)));
+}
+
+#[test]
+fn network_allowlist_matches_scheme_host_port_path_method_and_scope() {
+    let transport = MockTransport::new(vec![TransportResponse::json(
+        200,
+        BTreeMap::new(),
+        json!({"ok": true}),
+    )]);
+    let calls = transport.calls.clone();
+    let client = client_with_transport(
+        transport,
+        SignedRequestPolicy::default().with_rule(
+            NetworkAllowlistRule::new("https", "merchant.example")
+                .with_port(443)
+                .with_path_prefix("/api/orders")
+                .with_methods([WxMethod::Post])
+                .with_scope("coffee"),
+        ),
+        InMemoryTokenCache::new(),
+    );
+    let request = WxRequest {
+        url: "https://merchant.example:443/api/orders/checkout".to_owned(),
+        method: WxMethod::Post,
+        headers: BTreeMap::new(),
+        data: Some(json!({"drinkId": "latte"})),
+    };
+
+    let response = client.request(request).expect("allowlist rule matches");
+
+    assert_eq!(response.status_code, 200);
+    assert_eq!(calls.borrow().len(), 1);
+}
+
+#[test]
+fn url_only_allowlist_check_ignores_rule_scope_for_compatibility() {
+    let policy = SignedRequestPolicy::default().with_rule(
+        NetworkAllowlistRule::new("https", "merchant.example")
+            .with_path_prefix("/api/orders")
+            .with_scope("coffee"),
+    );
+
+    assert!(policy.allows("https://merchant.example/api/orders/checkout"));
+    assert!(!policy.allows("https://merchant.example/api/profile"));
+}
+
+#[test]
+fn network_allowlist_denies_scheme_method_path_and_scope_mismatch_before_transport() {
+    let cases = [
+        (
+            "http://merchant.example:443/api/orders/checkout",
+            WxMethod::Post,
+            "scheme mismatch",
+        ),
+        (
+            "https://merchant.example:443/api/profile",
+            WxMethod::Post,
+            "path mismatch",
+        ),
+        (
+            "https://merchant.example:443/api/orders/checkout",
+            WxMethod::Get,
+            "method mismatch",
+        ),
+    ];
+
+    for (url, method, label) in cases {
+        let transport = MockTransport::new(vec![]);
+        let calls = transport.calls.clone();
+        let client = client_with_transport(
+            transport,
+            SignedRequestPolicy::default().with_rule(
+                NetworkAllowlistRule::new("https", "merchant.example")
+                    .with_port(443)
+                    .with_path_prefix("/api/orders")
+                    .with_methods([WxMethod::Post])
+                    .with_scope("coffee"),
+            ),
+            InMemoryTokenCache::new(),
+        );
+
+        let error = client
+            .request(WxRequest {
+                url: url.to_owned(),
+                method,
+                headers: BTreeMap::new(),
+                data: None,
+            })
+            .unwrap_err();
+
+        assert!(
+            matches!(error, AnpRequestError::Denied(message) if message.contains("allowlist")),
+            "{label}"
+        );
+        assert!(calls.borrow().is_empty(), "{label}");
+    }
+
+    let transport = MockTransport::new(vec![]);
+    let calls = transport.calls.clone();
+    let client = client_with_transport(
+        transport,
+        SignedRequestPolicy::default().with_rule(
+            NetworkAllowlistRule::new("https", "merchant.example")
+                .with_path_prefix("/api/orders")
+                .with_methods([WxMethod::Post])
+                .with_scope("tea"),
+        ),
+        InMemoryTokenCache::new(),
+    );
+
+    let error = client
+        .request(WxRequest {
+            url: "https://merchant.example/api/orders/checkout".to_owned(),
+            method: WxMethod::Post,
+            headers: BTreeMap::new(),
+            data: None,
+        })
+        .unwrap_err();
+
+    assert!(matches!(error, AnpRequestError::Denied(message) if message.contains("allowlist")));
+    assert!(calls.borrow().is_empty());
 }
 
 #[test]
@@ -225,6 +346,33 @@ fn cached_bearer_401_clears_token_and_retries_with_signature() {
     );
     assert!(calls[1].headers.contains_key("Signature"));
     assert!(token_cache.get(&scope).is_none());
+}
+
+#[test]
+fn retry_policy_does_not_retry_non_idempotent_business_failure() {
+    let transport = MockTransport::new(vec![
+        TransportResponse::json(500, BTreeMap::new(), json!({"error": "try-later"})),
+        TransportResponse::json(200, BTreeMap::new(), json!({"ok": true})),
+    ]);
+    let calls = transport.calls.clone();
+    let client = client_with_transport(
+        transport,
+        SignedRequestPolicy::new(["merchant.example"]),
+        InMemoryTokenCache::new(),
+    );
+    let request = WxRequest {
+        url: "https://merchant.example/orders".to_owned(),
+        method: WxMethod::Post,
+        headers: BTreeMap::new(),
+        data: Some(json!({"orderId": "order-1"})),
+    };
+
+    let response = client
+        .request(request)
+        .expect("business response is returned without automatic retry");
+
+    assert_eq!(response.status_code, 500);
+    assert_eq!(calls.borrow().len(), 1);
 }
 
 #[test]

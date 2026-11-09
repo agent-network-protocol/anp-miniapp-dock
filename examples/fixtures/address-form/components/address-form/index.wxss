@@ -1,0 +1,25 @@
+.fixture-card {
+  padding: 12px;
+  background-color: #ffffff;
+  border: 1px solid #d9dee8;
+  border-radius: 8px;
+}
+
+.title {
+  font-size: 17px;
+  font-weight: 600;
+  color: #1f2933;
+}
+
+.boundary {
+  color: #465a69;
+  font-size: 13px;
+}
+
+.primary {
+  margin: 8px 0 0 0;
+  padding: 6px;
+  background-color: #245d63;
+  color: #ffffff;
+}
+

@@ -1,0 +1,465 @@
+{
+  "baseline": {
+    "cases": 18,
+    "failed": 0,
+    "iterationsPerCase": 1,
+    "measurement": "local-dev-ci-friendly",
+    "note": "Hardware-dependent baseline evidence only; not a production SLO.",
+    "passed": 18
+  },
+  "commandStatus": "ok",
+  "environment": {
+    "arch": "x86_64",
+    "commit": "b26d04c",
+    "os": "linux",
+    "productionSlo": false,
+    "rustc": "rustc 1.88.0 (6b00bc388 2025-06-23)",
+    "timestampMs": 1781384742233,
+    "workingTreeDirty": true
+  },
+  "full": false,
+  "mode": "smoke",
+  "redaction": {
+    "appliedByDefault": true,
+    "credentialMaterial": "omitted",
+    "localPaths": "redacted",
+    "payloadPolicy": "mock/dev-only fixture summaries only"
+  },
+  "resource": {
+    "memoryPerVm": {
+      "final": 19656,
+      "initial": 13100,
+      "max": 19656,
+      "measurement": "process-rss-sample",
+      "productionSlo": false,
+      "unit": "KiB"
+    }
+  },
+  "samples": [
+    {
+      "category": "skill_load",
+      "details": {
+        "loader": "skill-loader",
+        "safePathChecks": true
+      },
+      "iterations": 1,
+      "max": 1260,
+      "name": "skill_load",
+      "p50": 1260,
+      "p95": 1260,
+      "status": "pass",
+      "unit": "us"
+    },
+    {
+      "category": "api_vm_call",
+      "details": {
+        "apiName": "searchDrinks",
+        "fixture": "coffee.searchDrinks",
+        "mode": "cold-runtime-per-iteration"
+      },
+      "iterations": 1,
+      "max": 13329,
+      "name": "api_vm_call.coffee.searchDrinks",
+      "p50": 13329,
+      "p95": 13329,
+      "status": "pass",
+      "unit": "us"
+    },
+    {
+      "category": "component_render",
+      "details": {
+        "componentPath": "components/drink-list/index",
+        "fixture": "coffee.searchDrinks"
+      },
+      "iterations": 1,
+      "max": 2569,
+      "name": "component_render.coffee.searchDrinks",
+      "p50": 2569,
+      "p95": 2569,
+      "status": "pass",
+      "unit": "us"
+    },
+    {
+      "category": "render_ir_size",
+      "details": {
+        "componentPath": "components/drink-list/index",
+        "fixture": "coffee.searchDrinks",
+        "schemaVersion": "dock.render-ir.v1"
+      },
+      "iterations": 1,
+      "max": 2250,
+      "name": "render_ir_size.coffee.searchDrinks",
+      "p50": 2250,
+      "p95": 2250,
+      "status": "pass",
+      "unit": "bytes"
+    },
+    {
+      "category": "api_vm_call",
+      "details": {
+        "apiName": "confirmOrder",
+        "fixture": "coffee.confirmOrder",
+        "mode": "cold-runtime-per-iteration"
+      },
+      "iterations": 1,
+      "max": 13985,
+      "name": "api_vm_call.coffee.confirmOrder",
+      "p50": 13985,
+      "p95": 13985,
+      "status": "pass",
+      "unit": "us"
+    },
+    {
+      "category": "component_render",
+      "details": {
+        "componentPath": "components/order-confirm/index",
+        "fixture": "coffee.confirmOrder"
+      },
+      "iterations": 1,
+      "max": 2426,
+      "name": "component_render.coffee.confirmOrder",
+      "p50": 2426,
+      "p95": 2426,
+      "status": "pass",
+      "unit": "us"
+    },
+    {
+      "category": "render_ir_size",
+      "details": {
+        "componentPath": "components/order-confirm/index",
+        "fixture": "coffee.confirmOrder",
+        "schemaVersion": "dock.render-ir.v1"
+      },
+      "iterations": 1,
+      "max": 634,
+      "name": "render_ir_size.coffee.confirmOrder",
+      "p50": 634,
+      "p95": 634,
+      "status": "pass",
+      "unit": "bytes"
+    },
+    {
+      "category": "api_vm_call",
+      "details": {
+        "apiName": "payOrder",
+        "fixture": "coffee.payOrder",
+        "mode": "cold-runtime-per-iteration"
+      },
+      "iterations": 1,
+      "max": 14312,
+      "name": "api_vm_call.coffee.payOrder",
+      "p50": 14312,
+      "p95": 14312,
+      "status": "pass",
+      "unit": "us"
+    },
+    {
+      "category": "component_render",
+      "details": {
+        "componentPath": "components/payment-result/index",
+        "fixture": "coffee.payOrder"
+      },
+      "iterations": 1,
+      "max": 2279,
+      "name": "component_render.coffee.payOrder",
+      "p50": 2279,
+      "p95": 2279,
+      "status": "pass",
+      "unit": "us"
+    },
+    {
+      "category": "render_ir_size",
+      "details": {
+        "componentPath": "components/payment-result/index",
+        "fixture": "coffee.payOrder",
+        "schemaVersion": "dock.render-ir.v1"
+      },
+      "iterations": 1,
+      "max": 389,
+      "name": "render_ir_size.coffee.payOrder",
+      "p50": 389,
+      "p95": 389,
+      "status": "pass",
+      "unit": "bytes"
+    },
+    {
+      "category": "stress",
+      "details": {
+        "failClosed": true,
+        "isolation": "unique-session-id-per-iteration",
+        "sessions": 2
+      },
+      "iterations": 2,
+      "max": 15068,
+      "name": "stress.concurrent_sessions",
+      "p50": 15068,
+      "p95": 15068,
+      "status": "pass",
+      "unit": "us"
+    },
+    {
+      "category": "stress",
+      "details": {
+        "skillCount": 5,
+        "skillRefs": [
+          {
+            "kind": "local-directory",
+            "note": "Path is reported as provided because it is relative to the current working directory.",
+            "path": "examples/coffee-skill",
+            "redacted": false
+          },
+          {
+            "kind": "local-directory",
+            "note": "Path is reported as provided because it is relative to the current working directory.",
+            "path": "examples/fixtures/address-form",
+            "redacted": false
+          },
+          {
+            "kind": "local-directory",
+            "note": "Path is reported as provided because it is relative to the current working directory.",
+            "path": "examples/fixtures/media-review",
+            "redacted": false
+          },
+          {
+            "kind": "local-directory",
+            "note": "Path is reported as provided because it is relative to the current working directory.",
+            "path": "examples/fixtures/dynamic-status",
+            "redacted": false
+          },
+          {
+            "kind": "local-directory",
+            "note": "Path is reported as provided because it is relative to the current working directory.",
+            "path": "examples/fixtures/location-map-preview",
+            "redacted": false
+          }
+        ]
+      },
+      "iterations": 1,
+      "max": 57042,
+      "name": "stress.multi_skill",
+      "p50": 57042,
+      "p95": 57042,
+      "status": "pass",
+      "unit": "us"
+    },
+    {
+      "category": "stress",
+      "details": {
+        "componentCount": 3,
+        "fixtureSet": "coffee"
+      },
+      "iterations": 1,
+      "max": 34087,
+      "name": "stress.multi_component_render",
+      "p50": 34087,
+      "p95": 34087,
+      "status": "pass",
+      "unit": "us"
+    },
+    {
+      "category": "stress",
+      "details": {
+        "covers": [
+          "dynamic request broker",
+          "timer cleanup",
+          "expire cleanup"
+        ],
+        "fixture": "dynamic-status",
+        "mockOnly": true
+      },
+      "iterations": 1,
+      "max": 13498,
+      "name": "stress.dynamic_timer_request",
+      "p50": 13498,
+      "p95": 13498,
+      "status": "pass",
+      "unit": "us"
+    },
+    {
+      "category": "storage_write",
+      "details": {
+        "backend": "in-memory",
+        "productionReady": false,
+        "scope": "mock-default"
+      },
+      "iterations": 1,
+      "max": 30,
+      "name": "storage_write.in_memory",
+      "p50": 30,
+      "p95": 30,
+      "status": "pass",
+      "unit": "us"
+    },
+    {
+      "category": "storage_read",
+      "details": {
+        "backend": "in-memory",
+        "productionReady": false,
+        "scope": "mock-default"
+      },
+      "iterations": 1,
+      "max": 4,
+      "name": "storage_read.in_memory",
+      "p50": 4,
+      "p95": 4,
+      "status": "pass",
+      "unit": "us"
+    },
+    {
+      "category": "token_lookup",
+      "details": {
+        "cache": "in-memory",
+        "productionReady": false,
+        "tokenVisible": false
+      },
+      "iterations": 1,
+      "max": 4,
+      "name": "token_lookup.in_memory",
+      "p50": 4,
+      "p95": 4,
+      "status": "pass",
+      "unit": "us"
+    },
+    {
+      "category": "resource_limit",
+      "details": {
+        "actual": "API `searchDrinks` result exceeded size limit of 1 bytes",
+        "apiName": "searchDrinks",
+        "expected": "result_too_large",
+        "failClosed": true,
+        "otherSessionImpact": "none"
+      },
+      "iterations": 1,
+      "max": 1,
+      "name": "resource_limit.result_size_fail_closed",
+      "p50": 1,
+      "p95": 1,
+      "status": "pass",
+      "unit": "count"
+    }
+  ],
+  "schemaVersion": "dock.perf-baseline-report.v1",
+  "skillId": "coffee",
+  "skillRef": {
+    "kind": "local-directory",
+    "note": "Path is reported as provided because it is relative to the current working directory.",
+    "path": "examples/coffee-skill",
+    "redacted": false
+  },
+  "status": "ok",
+  "stress": {
+    "cases": [
+      {
+        "category": "stress",
+        "details": {
+          "failClosed": true,
+          "isolation": "unique-session-id-per-iteration",
+          "sessions": 2
+        },
+        "iterations": 2,
+        "max": 15068,
+        "name": "stress.concurrent_sessions",
+        "p50": 15068,
+        "p95": 15068,
+        "status": "pass",
+        "unit": "us"
+      },
+      {
+        "category": "stress",
+        "details": {
+          "skillCount": 5,
+          "skillRefs": [
+            {
+              "kind": "local-directory",
+              "note": "Path is reported as provided because it is relative to the current working directory.",
+              "path": "examples/coffee-skill",
+              "redacted": false
+            },
+            {
+              "kind": "local-directory",
+              "note": "Path is reported as provided because it is relative to the current working directory.",
+              "path": "examples/fixtures/address-form",
+              "redacted": false
+            },
+            {
+              "kind": "local-directory",
+              "note": "Path is reported as provided because it is relative to the current working directory.",
+              "path": "examples/fixtures/media-review",
+              "redacted": false
+            },
+            {
+              "kind": "local-directory",
+              "note": "Path is reported as provided because it is relative to the current working directory.",
+              "path": "examples/fixtures/dynamic-status",
+              "redacted": false
+            },
+            {
+              "kind": "local-directory",
+              "note": "Path is reported as provided because it is relative to the current working directory.",
+              "path": "examples/fixtures/location-map-preview",
+              "redacted": false
+            }
+          ]
+        },
+        "iterations": 1,
+        "max": 57042,
+        "name": "stress.multi_skill",
+        "p50": 57042,
+        "p95": 57042,
+        "status": "pass",
+        "unit": "us"
+      },
+      {
+        "category": "stress",
+        "details": {
+          "componentCount": 3,
+          "fixtureSet": "coffee"
+        },
+        "iterations": 1,
+        "max": 34087,
+        "name": "stress.multi_component_render",
+        "p50": 34087,
+        "p95": 34087,
+        "status": "pass",
+        "unit": "us"
+      },
+      {
+        "category": "stress",
+        "details": {
+          "covers": [
+            "dynamic request broker",
+            "timer cleanup",
+            "expire cleanup"
+          ],
+          "fixture": "dynamic-status",
+          "mockOnly": true
+        },
+        "iterations": 1,
+        "max": 13498,
+        "name": "stress.dynamic_timer_request",
+        "p50": 13498,
+        "p95": 13498,
+        "status": "pass",
+        "unit": "us"
+      },
+      {
+        "category": "resource_limit",
+        "details": {
+          "actual": "API `searchDrinks` result exceeded size limit of 1 bytes",
+          "apiName": "searchDrinks",
+          "expected": "result_too_large",
+          "failClosed": true,
+          "otherSessionImpact": "none"
+        },
+        "iterations": 1,
+        "max": 1,
+        "name": "resource_limit.result_size_fail_closed",
+        "p50": 1,
+        "p95": 1,
+        "status": "pass",
+        "unit": "count"
+      }
+    ],
+    "status": "pass"
+  }
+}

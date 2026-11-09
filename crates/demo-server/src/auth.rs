@@ -1,10 +1,10 @@
 use crate::audit::now_ms;
 use anp_adapter::{
     verify_challenge_proof_at, CapabilityTokenClaims, CapabilityTokenError, CapabilityTokenIssuer,
-    CapabilityTokenIssuerConfig, CapabilityTokenRequest, CapabilityTokenVerifier,
-    CapabilityTokenVerifierConfig, ChallengeProofError, ChallengeProofPayload,
-    DidChallenge as AdapterDidChallenge, DockDidChallengeProof, ExpectedCapability,
-    IdentitySession,
+    CapabilityTokenIssuerConfig, CapabilityTokenLifecycleMode, CapabilityTokenLifecycleStore,
+    CapabilityTokenRequest, CapabilityTokenVerifier, CapabilityTokenVerifierConfig,
+    ChallengeProofError, ChallengeProofPayload, DidChallenge as AdapterDidChallenge,
+    DockDidChallengeProof, ExpectedCapability, IdentitySession, InMemoryTokenLifecycleStore,
 };
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
@@ -227,6 +227,7 @@ struct ChallengeRecord {
 #[derive(Debug, Clone, Default)]
 pub struct AuthStore {
     challenges: Arc<Mutex<BTreeMap<String, ChallengeRecord>>>,
+    token_lifecycle: InMemoryTokenLifecycleStore,
 }
 
 impl AuthStore {
@@ -267,7 +268,7 @@ impl AuthStore {
             return Err(AuthError::ScopeMismatch);
         }
 
-        let record = self.challenge_record(&request.challenge_id)?;
+        let record = self.take_challenge_record(&request.challenge_id)?;
         if record
             .challenge
             .expires_at_ms
@@ -308,8 +309,6 @@ impl AuthStore {
         verify_challenge_proof_at(&proof, &expected_payload, &did_document, now_ms())
             .map_err(map_challenge_error)?;
 
-        self.remove_challenge(&request.challenge_id)?;
-
         let outcome = auth_config
             .token_issuer()?
             .issue(CapabilityTokenRequest::new(
@@ -333,30 +332,75 @@ impl AuthStore {
         header: Option<&str>,
         expected: ExpectedCapability,
     ) -> Result<CapabilityTokenClaims, AuthError> {
+        self.verify_bearer_with_lifecycle_mode(
+            auth_config,
+            header,
+            expected,
+            CapabilityTokenLifecycleMode::CheckOnly,
+        )
+    }
+
+    pub fn verify_bearer_once(
+        &self,
+        auth_config: &ServerAuthConfig,
+        header: Option<&str>,
+        expected: ExpectedCapability,
+    ) -> Result<CapabilityTokenClaims, AuthError> {
+        self.verify_bearer_with_lifecycle_mode(
+            auth_config,
+            header,
+            expected,
+            CapabilityTokenLifecycleMode::ConsumeOnce,
+        )
+    }
+
+    pub fn revoke_bearer(
+        &self,
+        auth_config: &ServerAuthConfig,
+        header: Option<&str>,
+        expected: ExpectedCapability,
+    ) -> Result<(), AuthError> {
+        let header = header.ok_or(AuthError::MissingToken)?;
+        let token = header
+            .strip_prefix("Bearer ")
+            .ok_or(AuthError::MissingToken)?;
+        let claims = auth_config
+            .token_verifier()?
+            .verify_with_lifecycle_at(
+                token,
+                &expected,
+                &self.token_lifecycle,
+                CapabilityTokenLifecycleMode::CheckOnly,
+                now_ms(),
+            )
+            .map_err(map_token_error)?;
+        self.token_lifecycle
+            .revoke_jti(&claims.jti, claims.expires_at_ms())
+            .map_err(map_token_error)
+    }
+
+    fn verify_bearer_with_lifecycle_mode(
+        &self,
+        auth_config: &ServerAuthConfig,
+        header: Option<&str>,
+        expected: ExpectedCapability,
+        mode: CapabilityTokenLifecycleMode,
+    ) -> Result<CapabilityTokenClaims, AuthError> {
         let header = header.ok_or(AuthError::MissingToken)?;
         let token = header
             .strip_prefix("Bearer ")
             .ok_or(AuthError::MissingToken)?;
         auth_config
             .token_verifier()?
-            .verify(token, &expected)
+            .verify_with_lifecycle_at(token, &expected, &self.token_lifecycle, mode, now_ms())
             .map_err(map_token_error)
     }
 
-    fn challenge_record(&self, challenge_id: &str) -> Result<ChallengeRecord, AuthError> {
-        let challenges = self.challenges.lock().map_err(|_| AuthError::Unavailable)?;
-        challenges
-            .get(challenge_id)
-            .cloned()
-            .ok_or(AuthError::UnknownChallenge)
-    }
-
-    fn remove_challenge(&self, challenge_id: &str) -> Result<(), AuthError> {
+    fn take_challenge_record(&self, challenge_id: &str) -> Result<ChallengeRecord, AuthError> {
         let mut challenges = self.challenges.lock().map_err(|_| AuthError::Unavailable)?;
-        if challenges.remove(challenge_id).is_none() {
-            return Err(AuthError::UnknownChallenge);
-        }
-        Ok(())
+        challenges
+            .remove(challenge_id)
+            .ok_or(AuthError::UnknownChallenge)
     }
 }
 
@@ -365,6 +409,8 @@ pub enum AuthError {
     MissingToken,
     InvalidToken,
     ExpiredToken,
+    RevokedToken,
+    ReplayedToken,
     InsufficientScope,
     UnknownChallenge,
     ExpiredChallenge,
@@ -410,9 +456,12 @@ fn map_challenge_error(error: ChallengeProofError) -> AuthError {
 fn map_token_error(error: CapabilityTokenError) -> AuthError {
     match error {
         CapabilityTokenError::Expired => AuthError::ExpiredToken,
+        CapabilityTokenError::Revoked => AuthError::RevokedToken,
+        CapabilityTokenError::Replayed => AuthError::ReplayedToken,
         CapabilityTokenError::MissingScope => AuthError::InsufficientScope,
         CapabilityTokenError::ScopeMismatch => AuthError::ScopeMismatch,
         CapabilityTokenError::MissingSecret => AuthError::TokenIssuerUnavailable,
+        CapabilityTokenError::LifecycleUnavailable => AuthError::Unavailable,
         _ => AuthError::InvalidToken,
     }
 }
@@ -510,11 +559,85 @@ mod tests {
     }
 
     #[test]
+    fn server_token_lifecycle_rejects_revoked_token() {
+        let fixture = DidFixture::new();
+        let config = ServerAuthConfig::for_tests();
+        let store = AuthStore::default();
+        let response = config
+            .issue_localhost_login_token(
+                "session-1",
+                "coffee",
+                fixture.did(),
+                Some("did:wba:agent.example".to_owned()),
+            )
+            .expect("token issues");
+        let header = format!("Bearer {}", response.capability_token);
+        let expected = expected("coffee:drinks:read", &config, fixture.did());
+
+        store
+            .verify_bearer(&config, Some(&header), expected.clone())
+            .expect("token verifies before revoke");
+        store
+            .revoke_bearer(&config, Some(&header), expected.clone())
+            .expect("token revokes");
+
+        assert_eq!(
+            store
+                .verify_bearer(&config, Some(&header), expected)
+                .expect_err("revoked token fails"),
+            AuthError::RevokedToken
+        );
+    }
+
+    #[test]
+    fn server_token_lifecycle_rejects_jti_replay_for_one_time_verification() {
+        let fixture = DidFixture::new();
+        let config = ServerAuthConfig::for_tests();
+        let store = AuthStore::default();
+        let response = config
+            .issue_localhost_login_token(
+                "session-1",
+                "coffee",
+                fixture.did(),
+                Some("did:wba:agent.example".to_owned()),
+            )
+            .expect("token issues");
+        let header = format!("Bearer {}", response.capability_token);
+        let expected = expected("coffee:order:confirm", &config, fixture.did());
+
+        store
+            .verify_bearer_once(&config, Some(&header), expected.clone())
+            .expect("first one-time token use verifies");
+
+        assert_eq!(
+            store
+                .verify_bearer_once(&config, Some(&header), expected)
+                .expect_err("replayed jti fails"),
+            AuthError::ReplayedToken
+        );
+    }
+
+    #[test]
     fn token_issuer_summary_redacts_secret() {
         let issuer = TokenIssuerConfig::new_hs256("real-secret").expect("issuer config");
 
         assert_eq!(issuer.redacted_summary().get("secret"), Some(&"[REDACTED]"));
         assert!(!format!("{:?}", issuer.redacted_summary()).contains("real-secret"));
+    }
+
+    fn expected(scope: &str, config: &ServerAuthConfig, user_did: String) -> ExpectedCapability {
+        ExpectedCapability::new(
+            config.merchant_did.clone(),
+            config.merchant_did.clone(),
+            config.merchant_did.clone(),
+            anp_adapter::ExpectedCapabilitySubject::new(
+                user_did,
+                Some("did:wba:agent.example".to_owned()),
+                "session-1",
+            ),
+            "coffee",
+            scope,
+        )
     }
 
     struct DidFixture {

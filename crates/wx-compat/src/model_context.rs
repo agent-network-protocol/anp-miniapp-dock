@@ -3,6 +3,23 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use std::sync::{Arc, Mutex};
 
+pub const NOTIFICATION_TYPE_INPUT: &str = "input";
+pub const NOTIFICATION_TYPE_RESULT: &str = "result";
+pub const NOTIFICATION_TYPE_EXPIRE: &str = "expire";
+pub const NOTIFICATION_TYPE_OVERFLOW: &str = "overflow";
+
+pub fn notification_type_js_literal() -> &'static str {
+    "{ Input: 'input', Result: 'result', Expire: 'expire', Overflow: 'overflow' }"
+}
+
+pub fn default_device_info_js_literal() -> &'static str {
+    "{ platform: 'anp-miniapp-dock', model: 'host-runtime', language: 'en' }"
+}
+
+pub fn default_app_base_info_js_literal() -> &'static str {
+    "{ SDKVersion: '0.1.0', version: '0.1.0' }"
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RelatedPage {
     pub path: String,
@@ -66,6 +83,22 @@ impl Default for DeviceInfo {
             platform: "anp-miniapp-dock".to_owned(),
             model: "host-runtime".to_owned(),
             language: "en".to_owned(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AppBaseInfo {
+    #[serde(rename = "SDKVersion")]
+    pub sdk_version: String,
+    pub version: String,
+}
+
+impl Default for AppBaseInfo {
+    fn default() -> Self {
+        Self {
+            sdk_version: "0.1.0".to_owned(),
+            version: "0.1.0".to_owned(),
         }
     }
 }
@@ -143,6 +176,10 @@ impl ModelContext {
 
     pub fn get_device_info(&self) -> DeviceInfo {
         DeviceInfo::default()
+    }
+
+    pub fn get_app_base_info(&self) -> AppBaseInfo {
+        AppBaseInfo::default()
     }
 }
 

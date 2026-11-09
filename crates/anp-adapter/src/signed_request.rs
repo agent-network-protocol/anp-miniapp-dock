@@ -5,24 +5,35 @@ use crate::token::{
 use anp::authentication::{AuthMode, DIDWbaAuthHeader};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
+use std::fmt;
 use thiserror::Error;
 use wx_compat::{
     Capability, CapabilityProfile, PermissionDecision, RequestBroker, WxMethod, WxRequest,
     WxRequestError, WxResponse,
 };
 
+const ANY_SCOPE: &str = "*";
+
 #[derive(Debug, Clone)]
 pub struct SignedRequestPolicy {
-    allowlist: BTreeSet<String>,
+    rules: Vec<NetworkAllowlistRule>,
     auth_mode: AuthMode,
 }
 
 impl SignedRequestPolicy {
     pub fn new(allowlist: impl IntoIterator<Item = impl Into<String>>) -> Self {
         Self {
-            allowlist: allowlist.into_iter().map(Into::into).collect(),
+            rules: allowlist
+                .into_iter()
+                .map(|host| NetworkAllowlistRule::host(host.into()))
+                .collect(),
             auth_mode: AuthMode::HttpSignatures,
         }
+    }
+
+    pub fn with_rule(mut self, rule: NetworkAllowlistRule) -> Self {
+        self.rules.push(rule);
+        self
     }
 
     pub fn with_auth_mode(mut self, auth_mode: AuthMode) -> Self {
@@ -35,16 +46,133 @@ impl SignedRequestPolicy {
     }
 
     pub fn allows(&self, url: &str) -> bool {
-        let Some(authority) = authority(url) else {
-            return false;
-        };
-        self.allowlist.contains(&authority)
+        let request = WxRequest::get(url);
+        self.allows_request(&request, &self.default_scope_name())
+            .is_ok()
+    }
+
+    pub fn allows_request(
+        &self,
+        request: &WxRequest,
+        scope: &str,
+    ) -> Result<(), NetworkAllowlistDenial> {
+        let parsed =
+            ParsedUrl::parse(&request.url).map_err(|reason| NetworkAllowlistDenial { reason })?;
+        if self
+            .rules
+            .iter()
+            .any(|rule| rule.matches(&parsed, request.method, scope))
+        {
+            return Ok(());
+        }
+        Err(NetworkAllowlistDenial {
+            reason: format!(
+                "request URL is not in allowlist: {}",
+                redact_for_log(&request.url)
+            ),
+        })
+    }
+
+    fn default_scope_name(&self) -> String {
+        ANY_SCOPE.to_owned()
     }
 }
 
 impl Default for SignedRequestPolicy {
     fn default() -> Self {
         Self::new(std::iter::empty::<String>())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NetworkAllowlistRule {
+    scheme: Option<String>,
+    host: String,
+    port: Option<u16>,
+    path_prefix: String,
+    methods: BTreeSet<WxMethod>,
+    scopes: BTreeSet<String>,
+}
+
+impl NetworkAllowlistRule {
+    pub fn host(host: impl Into<String>) -> Self {
+        Self {
+            scheme: None,
+            host: normalize_host(host.into()),
+            port: None,
+            path_prefix: "/".to_owned(),
+            methods: BTreeSet::new(),
+            scopes: BTreeSet::from([ANY_SCOPE.to_owned()]),
+        }
+    }
+
+    pub fn new(scheme: impl Into<String>, host: impl Into<String>) -> Self {
+        Self::host(host).with_scheme(scheme)
+    }
+
+    pub fn with_scheme(mut self, scheme: impl Into<String>) -> Self {
+        self.scheme = Some(scheme.into().to_ascii_lowercase());
+        self
+    }
+
+    pub fn with_port(mut self, port: u16) -> Self {
+        self.port = Some(port);
+        self
+    }
+
+    pub fn with_path_prefix(mut self, path_prefix: impl Into<String>) -> Self {
+        let path_prefix = path_prefix.into();
+        self.path_prefix = if path_prefix.starts_with('/') {
+            path_prefix
+        } else {
+            format!("/{path_prefix}")
+        };
+        self
+    }
+
+    pub fn with_methods(mut self, methods: impl IntoIterator<Item = WxMethod>) -> Self {
+        self.methods = methods.into_iter().collect();
+        self
+    }
+
+    pub fn with_scope(mut self, scope: impl Into<String>) -> Self {
+        self.scopes = BTreeSet::from([scope.into()]);
+        self
+    }
+
+    pub fn with_scopes(mut self, scopes: impl IntoIterator<Item = impl Into<String>>) -> Self {
+        self.scopes = scopes.into_iter().map(Into::into).collect();
+        self
+    }
+
+    fn matches(&self, parsed: &ParsedUrl, method: WxMethod, scope: &str) -> bool {
+        self.scheme
+            .as_deref()
+            .is_none_or(|scheme| scheme == parsed.scheme)
+            && self.host == parsed.host
+            && self.port.is_none_or(|port| Some(port) == parsed.port)
+            && path_has_prefix(&parsed.path, &self.path_prefix)
+            && (self.methods.is_empty() || self.methods.contains(&method))
+            && (scope == ANY_SCOPE
+                || self.scopes.contains(ANY_SCOPE)
+                || self.scopes.contains(scope))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NetworkAllowlistDenial {
+    reason: String,
+}
+
+impl NetworkAllowlistDenial {
+    pub fn reason(&self) -> &str {
+        &self.reason
+    }
+}
+
+impl fmt::Display for NetworkAllowlistDenial {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(&self.reason)
     }
 }
 
@@ -156,7 +284,7 @@ where
         request: &WxRequest,
         force_signature: bool,
     ) -> Result<AuthMaterial, AnpRequestError> {
-        self.ensure_allowed(&request.url)?;
+        self.ensure_allowed(request)?;
         let scope = self.token_scope();
         if !force_signature {
             if let Some(token) = self.token_cache.get(&scope) {
@@ -199,7 +327,7 @@ where
     }
 
     pub fn request(&self, request: WxRequest) -> Result<WxResponse, AnpRequestError> {
-        self.ensure_allowed(&request.url)?;
+        self.ensure_allowed(&request)?;
         let body = body_bytes(&request.data)?;
         let auth = self.auth_material_for(&request, false)?;
         let mut signed = request.clone();
@@ -271,14 +399,10 @@ where
         })
     }
 
-    fn ensure_allowed(&self, url: &str) -> Result<(), AnpRequestError> {
-        if self.policy.allows(url) {
-            return Ok(());
-        }
-        Err(AnpRequestError::Denied(format!(
-            "request URL is not in allowlist: {}",
-            redact_for_log(url)
-        )))
+    fn ensure_allowed(&self, request: &WxRequest) -> Result<(), AnpRequestError> {
+        self.policy
+            .allows_request(request, &self.network_scope_name())
+            .map_err(|denial| AnpRequestError::Denied(denial.to_string()))
     }
 
     fn token_scope(&self) -> CapabilityTokenScope {
@@ -289,6 +413,10 @@ where
             self.session.skill_id.clone(),
             Some(self.session.session_id.clone()),
         )
+    }
+
+    fn network_scope_name(&self) -> String {
+        self.session.skill_id.clone()
     }
 }
 
@@ -315,11 +443,25 @@ where
         request: WxRequest,
     ) -> Result<WxResponse, WxRequestError> {
         match profile.check(Capability::Request) {
-            PermissionDecision::Allow => self
-                .client
-                .request(request)
-                .map_err(|error| WxRequestError::Denied(error.safe_message())),
-            PermissionDecision::Deny { reason, .. } => Err(WxRequestError::Denied(reason)),
+            PermissionDecision::Allow => {
+                self.client.request(request).map_err(|error| match error {
+                    AnpRequestError::Denied(_)
+                    | AnpRequestError::Credential(_)
+                    | AnpRequestError::Authentication(_)
+                    | AnpRequestError::Unauthorized(_) => {
+                        WxRequestError::Denied(error.safe_message())
+                    }
+                    AnpRequestError::Transport(_) | AnpRequestError::Serialization(_) => {
+                        WxRequestError::Transport(error.safe_message())
+                    }
+                })
+            }
+            PermissionDecision::MockAllowed { reason, .. } => Err(WxRequestError::Unsupported(
+                format!("mock request permission cannot use real ANP transport: {reason}"),
+            )),
+            PermissionDecision::Deny { reason, .. } | PermissionDecision::Prompt { reason, .. } => {
+                Err(WxRequestError::Denied(reason))
+            }
         }
     }
 }
@@ -428,10 +570,110 @@ fn reqwest_method(method: WxMethod) -> reqwest::Method {
     }
 }
 
-fn authority(url: &str) -> Option<String> {
-    let (_, rest) = url.split_once("://")?;
-    rest.split(['/', '?', '#'])
-        .next()
-        .filter(|authority| !authority.is_empty())
-        .map(ToOwned::to_owned)
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ParsedUrl {
+    scheme: String,
+    host: String,
+    port: Option<u16>,
+    path: String,
+}
+
+impl ParsedUrl {
+    fn parse(url: &str) -> Result<Self, String> {
+        let (scheme, rest) = url
+            .split_once("://")
+            .ok_or_else(|| "request URL must include a scheme".to_owned())?;
+        let scheme = scheme.trim().to_ascii_lowercase();
+        if scheme.is_empty() {
+            return Err("request URL scheme is empty".to_owned());
+        }
+
+        let (authority, path_with_suffix) = match rest.find(['/', '?', '#']) {
+            Some(index) => (&rest[..index], &rest[index..]),
+            None => (rest, ""),
+        };
+        if authority.trim().is_empty() {
+            return Err("request URL host is empty".to_owned());
+        }
+
+        let (host, port) = parse_authority(authority)?;
+        let path = if path_with_suffix.is_empty() || path_with_suffix.starts_with(['?', '#']) {
+            "/".to_owned()
+        } else {
+            path_with_suffix
+                .split(['?', '#'])
+                .next()
+                .unwrap_or("/")
+                .to_owned()
+        };
+
+        Ok(Self {
+            scheme,
+            host,
+            port,
+            path,
+        })
+    }
+}
+
+fn parse_authority(authority: &str) -> Result<(String, Option<u16>), String> {
+    let without_userinfo = authority
+        .rsplit_once('@')
+        .map(|(_, host)| host)
+        .unwrap_or(authority);
+    if without_userinfo.starts_with('[') {
+        let Some(end) = without_userinfo.find(']') else {
+            return Err("request URL IPv6 host is invalid".to_owned());
+        };
+        let host = normalize_host(&without_userinfo[..=end]);
+        let port = without_userinfo[end + 1..]
+            .strip_prefix(':')
+            .map(parse_port)
+            .transpose()?;
+        return Ok((host, port));
+    }
+
+    let (host, port) = match without_userinfo.rsplit_once(':') {
+        Some((host, port)) if !port.is_empty() && port.chars().all(|ch| ch.is_ascii_digit()) => {
+            (host, Some(parse_port(port)?))
+        }
+        _ => (without_userinfo, None),
+    };
+    let host = normalize_host(host);
+    if host.is_empty() {
+        return Err("request URL host is empty".to_owned());
+    }
+    Ok((host, port))
+}
+
+fn parse_port(port: &str) -> Result<u16, String> {
+    port.parse::<u16>()
+        .map_err(|_| "request URL port is invalid".to_owned())
+}
+
+fn normalize_host(host: impl AsRef<str>) -> String {
+    host.as_ref()
+        .trim()
+        .trim_end_matches('.')
+        .to_ascii_lowercase()
+}
+
+fn path_has_prefix(path: &str, prefix: &str) -> bool {
+    let normalized_path = if path.starts_with('/') {
+        path.to_owned()
+    } else {
+        format!("/{path}")
+    };
+    let normalized_prefix = if prefix.starts_with('/') {
+        prefix.to_owned()
+    } else {
+        format!("/{prefix}")
+    };
+    if normalized_prefix == "/" {
+        return true;
+    }
+    normalized_path == normalized_prefix
+        || normalized_path
+            .strip_prefix(&normalized_prefix)
+            .is_some_and(|rest| rest.starts_with('/'))
 }

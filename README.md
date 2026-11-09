@@ -8,11 +8,26 @@ The MVP is now implemented as a Cargo workspace. It can load a MiniApp MCP-style
 
 - [Agentic MiniApp Container MVP PRD](docs/architecture/agentic-miniapp-container-prd.md)
 - [anp-miniapp-dock System Architecture](docs/architecture/anp-skill-dock-architecture.md)
+- [Current capability baseline](docs/architecture/current-capability-baseline.md)
+- [wx API compatibility matrix](docs/architecture/wx-api-compatibility-matrix.md)
+- [Component compatibility matrix](docs/architecture/component-compatibility-matrix.md)
 - [MiniApp MCP Compatibility MVP](docs/architecture/miniapp-mcp-compatibility-mvp.md)
 - [MiniApp MCP Component Runtime](docs/architecture/miniapp-mcp-component-runtime.md)
 - [MiniApp MCP protocol notes](docs/weichat-miniapp-mcp-protocol/weichat-miniapp-mcp.txt)
 - [Local demo runbook](docs/runbook/local-demo.md)
 - [Security runbook](docs/runbook/security.md)
+- [Threat model](docs/security/threat-model.md)
+- [Release gates runbook](docs/runbook/release-gates.md)
+- [Release process, canary, and rollback runbook](docs/runbook/release-process.md)
+- [Operations runbook](docs/runbook/operations.md)
+- [Troubleshooting runbook](docs/runbook/troubleshooting.md)
+- [Privacy deletion runbook](docs/runbook/privacy-deletion.md)
+- [Developer docs](docs/developer/README.md)
+  - [Import WeChat MiniApp MCP Skill](docs/developer/import-wechat-mcp-skill.md)
+  - [wx API compatibility guide](docs/developer/wx-api-compatibility.md)
+  - [Component compatibility guide](docs/developer/component-compatibility.md)
+  - [Security guidelines](docs/developer/security-guidelines.md)
+  - [Host adapter guide](docs/developer/host-adapter-guide.md)
 - [Production readiness roadmap](docs/plan/production-readiness-roadmap.md)
   - [Detailed production readiness phase plans](docs/plan/production-readiness/README.md)
 
@@ -30,6 +45,10 @@ The MVP is now implemented as a Cargo workspace. It can load a MiniApp MCP-style
 - `crates/demo-server`: coffee merchant Agent demo server.
 - `crates/dock-cli`: developer CLI and coffee E2E harness.
 - `examples/coffee-skill`: mock MiniApp MCP coffee Skill fixture.
+- `examples/fixtures`: mock-only compatibility fixtures for address-form, media-review, dynamic-status, and location-map-preview, each with README, expected `test-skill` JSON summary, and Render IR snapshot evidence.
+- `testdata/render-ir`: golden Render IR snapshots for fixture regression tests.
+- `testdata/perf`: local performance/stress smoke baseline JSON artifacts.
+- `scripts/release-gates.sh`: local vendor-neutral release gate runner and JSON report generator.
 - `examples/coffee-fastapi-server`: Python/FastAPI localhost coffee service used to simulate a remote HTTP merchant.
 - `mac-app/AnpMiniappDockMac`: SwiftUI/Xcode chatbot host that recognizes user intent, calls the local MiniApp container, and renders Skill components.
 
@@ -48,20 +67,57 @@ Focused commands:
 
 ```bash
 cargo test -p dock-cli --test coffee_order_flow
+cargo test -p component-runtime snapshot
+cargo test -p dock-cli fixture
+cargo test -p dock-cli perf
 cargo test -p demo-server
 cargo test -p component-runtime component_vm
+```
+
+Release gate runner:
+
+```bash
+./scripts/release-gates.sh
+```
+
+The runner emits `dock.release-gates-report.v1` at `target/release-gates/release-gates-report.json` by default. It runs the release gates from `docs/runbook/release-gates.md`, records pass/fail/skip, treats skip as not-pass, and marks redaction failure, consent bypass, sandbox escape, and token/Authorization/Signature leakage as hard blockers. Use `--quick` only to validate the script/report plumbing during development; it is not release approval. Pass `--release-notes <path>` or `RELEASE_NOTES_PATH=<path>` when a release notes file exists.
+
+Local canary/release dry-run:
+
+```bash
+./scripts/release-gates.sh --release-notes docs/runbook/releases/2026-06-14-local-canary.md
 ```
 
 ## CLI
 
 `dock-cli` prints JSON so outputs can be used as validation evidence or piped into other tools.
+For the end-to-end developer workflow, read the [developer docs](docs/developer/README.md).
+`validate` emits the stable `dock.validate-report.v1` schema. Its `status` / `reportStatus`
+describe release-readiness (`ok`, `warning`, or `error`), while `commandStatus: "ok"` means the
+CLI command itself completed. Local absolute paths and sensitive material are redacted from the
+report; the coffee fixture remains `compatibilityLevel: "demo-only"` because it is unsigned and
+uses demo-only localhost compatibility metadata.
 
 ```bash
 cargo run -p dock-cli -- validate examples/coffee-skill
+cargo run -p dock-cli -- inspect examples/coffee-skill
+cargo run -p dock-cli -- test-skill examples/coffee-skill
+cargo run -p dock-cli -- validate examples/fixtures/address-form
+cargo run -p dock-cli -- test-skill examples/fixtures/address-form
+cargo run -p dock-cli -- test-skill examples/fixtures/media-review
+cargo run -p dock-cli -- test-skill examples/fixtures/dynamic-status
+cargo run -p dock-cli -- test-skill examples/fixtures/location-map-preview
+cargo run -p dock-cli -- import-wechat-mcp examples/coffee-skill --dry-run
+cargo run -p dock-cli -- doctor
+cargo run -p dock-cli -- perf examples/coffee-skill --iterations 1
 cargo run -p dock-cli -- call-api examples/coffee-skill searchDrinks '{}'
 cargo run -p dock-cli -- preview-component examples/coffee-skill components/drink-list/index '{"apiName":"searchDrinks","structuredContent":{"drinks":[{"id":"latte","name":"Latte","price":18}]}}'
 cargo run -p dock-cli -- preview-card '{"content":[{"type":"text","text":"paid"}],"structuredContent":{"orderId":"order_demo_001","status":"paid"}}'
 ```
+
+`doctor` emits `dock.doctor-report.v1` and checks the local toolchain, workspace, runtime config contract, Skill package, DID identity, signing credential file permissions, resolver, allowlist, storage/audit backend profile, Host providers, sandbox gate surface, and optional remote server health. Without `--server`, server health is `skip`, not `pass`; with `--ci`, failing checks produce `commandStatus: "failed"` after the JSON report is written. Local default config and headless/demo backends remain warning/skip evidence, not production-ready evidence.
+
+`perf` emits `dock.perf-baseline-report.v1` and records local, hardware-dependent smoke evidence for Skill load, API VM calls, component render, Render IR size, token lookup, storage read/write, process RSS memory sample, concurrent sessions, multi-Skill, multi-component render, dynamic request/timer, and resource-limit fail-closed behavior. The sample artifact in `testdata/perf/coffee-smoke-baseline.json` is release evidence and schema documentation, not a production SLO.
 
 To run the coffee flow against the Python/FastAPI localhost service:
 

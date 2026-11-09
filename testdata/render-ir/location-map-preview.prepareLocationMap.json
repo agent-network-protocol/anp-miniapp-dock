@@ -1,0 +1,154 @@
+{
+  "actions": [],
+  "auditSummary": {
+    "boundary": "host-location-provider-fail-closed",
+    "dataPolicy": "opaque-location-token-only",
+    "provider": "wx.getLocation",
+    "riskLevel": "L4"
+  },
+  "component": "location-map-preview",
+  "eventActions": [
+    {
+      "content": [
+        {
+          "text": "Request Host location provider",
+          "type": "text"
+        },
+        {
+          "data": {
+            "arguments": {
+              "locationToken": "location_handle_demo_001"
+            },
+            "name": "prepareLocationMap"
+          },
+          "type": "api/call"
+        }
+      ],
+      "type": "sendFollowUpMessage"
+    },
+    {
+      "arguments": {
+        "locationToken": "location_handle_demo_001"
+      },
+      "name": "prepareLocationMap",
+      "type": "api/call"
+    }
+  ],
+  "expire": {
+    "expired": true,
+    "ok": true
+  },
+  "fixture": "location-map-preview",
+  "metadata": {
+    "componentPath": "components/location-map-preview/index",
+    "dynamic": false,
+    "expirable": false,
+    "relatedPage": {
+      "path": "pages/location/preview",
+      "query": {
+        "fixture": "location-map-preview"
+      }
+    }
+  },
+  "render": {
+    "root": {
+      "children": [
+        {
+          "id": "text-1",
+          "kind": "text",
+          "style": {
+            "color": "#1f2933",
+            "fontSize": "17px",
+            "fontWeight": "600"
+          },
+          "text": "Mock location preview"
+        },
+        {
+          "id": "map-3",
+          "kind": "map-preview",
+          "props": {
+            "description": "fail-closed",
+            "id": "store-map",
+            "locationToken": "location_handle_demo_001",
+            "region": "mock-region-downtown",
+            "scale": 12,
+            "title": "Mock pickup area"
+          }
+        },
+        {
+          "id": "text-4",
+          "kind": "text",
+          "text": "fail-closed"
+        },
+        {
+          "id": "text-6",
+          "kind": "text",
+          "text": "host_location_provider_required"
+        },
+        {
+          "children": [
+            {
+              "id": "text-9",
+              "kind": "text",
+              "text": "Request Host location"
+            }
+          ],
+          "events": [
+            {
+              "dataset": {
+                "location-token": "location_handle_demo_001"
+              },
+              "event": "tap",
+              "method": "requestLocation"
+            }
+          ],
+          "id": "button-8",
+          "kind": "button",
+          "style": {
+            "background": "#245d63",
+            "color": "#ffffff",
+            "margin": "8px 0 0 0",
+            "padding": "6px"
+          }
+        }
+      ],
+      "id": "view-0",
+      "kind": "view",
+      "style": {
+        "background": "#ffffff",
+        "border": "1px solid #d9dee8",
+        "borderRadius": "8px",
+        "padding": "12px"
+      }
+    },
+    "schemaVersion": "dock.render-ir.v1",
+    "warnings": []
+  },
+  "state": {
+    "_meta": {
+      "fixture": "prepareLocationMap",
+      "mockOnly": true
+    },
+    "apiName": "prepareLocationMap",
+    "arguments": {
+      "locationToken": "location_handle_demo_001"
+    },
+    "content": [
+      {
+        "text": "prepareLocationMap fixture result",
+        "type": "text"
+      }
+    ],
+    "fallbackReason": "host_location_provider_required",
+    "location": {
+      "fallbackReason": "host_location_provider_required",
+      "locationToken": "location_handle_demo_001",
+      "providerStatus": "fail-closed",
+      "region": "mock-region-downtown"
+    },
+    "locationToken": "location_handle_demo_001",
+    "providerStatus": "fail-closed",
+    "region": "mock-region-downtown"
+  },
+  "warnings": []
+}

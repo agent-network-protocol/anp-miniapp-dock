@@ -1,0 +1,187 @@
+{
+  "actions": [],
+  "auditSummary": {
+    "boundary": "host-media-provider-required",
+    "dataPolicy": "opaque-file-and-image-handles-only",
+    "provider": "wx.chooseMedia",
+    "riskLevel": "L4"
+  },
+  "component": "media-review",
+  "eventActions": [
+    {
+      "content": [
+        {
+          "text": "Approve mock media handles",
+          "type": "text"
+        },
+        {
+          "data": {
+            "arguments": {
+              "fileHandle": "file_handle_demo_001",
+              "imageHandle": "image_handle_demo_001"
+            },
+            "name": "reviewMedia"
+          },
+          "type": "api/call"
+        }
+      ],
+      "type": "sendFollowUpMessage"
+    },
+    {
+      "arguments": {
+        "fileHandle": "file_handle_demo_001",
+        "imageHandle": "image_handle_demo_001"
+      },
+      "name": "reviewMedia",
+      "type": "api/call"
+    }
+  ],
+  "expire": {
+    "expired": true,
+    "ok": true
+  },
+  "fixture": "media-review",
+  "metadata": {
+    "componentPath": "components/media-review/index",
+    "dynamic": false,
+    "expirable": true,
+    "expiredText": "Mock media review expired"
+  },
+  "render": {
+    "root": {
+      "children": [
+        {
+          "id": "text-1",
+          "kind": "text",
+          "style": {
+            "color": "#1f2933",
+            "fontSize": "17px",
+            "fontWeight": "600"
+          },
+          "text": "Mock media review"
+        },
+        {
+          "events": [
+            {
+              "event": "image_error",
+              "method": "onImageError"
+            },
+            {
+              "event": "image_load",
+              "method": "onImageLoad"
+            }
+          ],
+          "id": "image-3",
+          "kind": "image",
+          "props": {
+            "src": "https://static.example.invalid/fixtures/media-preview.png"
+          },
+          "style": {
+            "height": "120px",
+            "width": "180px"
+          }
+        },
+        {
+          "id": "canvas-4",
+          "kind": "canvas-static",
+          "props": {
+            "canvasId": "media-poster",
+            "description": "Static media poster",
+            "height": 180,
+            "poster": "https://static.example.invalid/fixtures/media-poster.png",
+            "width": 320
+          }
+        },
+        {
+          "id": "text-5",
+          "kind": "text",
+          "style": {
+            "color": "#465a69",
+            "fontSize": "12px"
+          },
+          "text": "image_handle_demo_001"
+        },
+        {
+          "id": "text-7",
+          "kind": "text",
+          "style": {
+            "color": "#465a69",
+            "fontSize": "12px"
+          },
+          "text": "file_handle_demo_001"
+        },
+        {
+          "id": "text-9",
+          "kind": "text",
+          "style": {
+            "color": "#245d63",
+            "fontSize": "13px"
+          },
+          "text": "wx.chooseMedia:host-boundary"
+        },
+        {
+          "children": [
+            {
+              "id": "text-12",
+              "kind": "text",
+              "text": "Approve opaque handles"
+            }
+          ],
+          "events": [
+            {
+              "event": "tap",
+              "method": "approve"
+            }
+          ],
+          "id": "button-11",
+          "kind": "button",
+          "style": {
+            "background": "#245d63",
+            "color": "#ffffff",
+            "margin": "8px 0 0 0",
+            "padding": "6px"
+          }
+        }
+      ],
+      "id": "view-0",
+      "kind": "view",
+      "style": {
+        "background": "#ffffff",
+        "border": "1px solid #d9dee8",
+        "borderRadius": "8px",
+        "padding": "12px"
+      }
+    },
+    "schemaVersion": "dock.render-ir.v1",
+    "warnings": []
+  },
+  "state": {
+    "_meta": {
+      "fixture": "reviewMedia",
+      "mockOnly": true
+    },
+    "apiName": "reviewMedia",
+    "arguments": {
+      "fileHandle": "file_handle_demo_001",
+      "imageHandle": "image_handle_demo_001"
+    },
+    "boundary": "wx.chooseMedia:host-boundary",
+    "content": [
+      {
+        "text": "reviewMedia fixture result",
+        "type": "text"
+      }
+    ],
+    "fileHandle": "file_handle_demo_001",
+    "imageHandle": "image_handle_demo_001",
+    "media": {
+      "fileHandle": "file_handle_demo_001",
+      "imageHandle": "image_handle_demo_001",
+      "poster": "https://static.example.invalid/fixtures/media-poster.png",
+      "previewImage": "https://static.example.invalid/fixtures/media-preview.png"
+    },
+    "poster": "https://static.example.invalid/fixtures/media-poster.png",
+    "previewImage": "https://static.example.invalid/fixtures/media-preview.png"
+  },
+  "warnings": []
+}

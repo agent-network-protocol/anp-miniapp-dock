@@ -7,6 +7,6 @@ pub mod middleware;
 
 pub use api_vm::{
     ApiCall, ApiVm, ApiVmConfig, ApiVmError, ConsoleEntry, ConsoleLevel, ExecutionTrace,
-    HostDidAuthConfig, QuickJsApiExecutor, RegisteredApi,
+    HostDidAuthConfig, QuickJsApiExecutor, QuickJsApiExecutorWithMetrics, RegisteredApi,
 };
 pub use commonjs::{CommonJsModule, CommonJsModules};

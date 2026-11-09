@@ -1,0 +1,33 @@
+{
+  "schemaVersion": "dock.test-skill-report.v1",
+  "status": "ok",
+  "commandStatus": "ok",
+  "skillId": "location-map-preview",
+  "fixtureSet": "location-map-preview",
+  "mockProvider": {
+    "status": "dev-only",
+    "productionReady": false
+  },
+  "summary": {
+    "total": 1,
+    "failed": 0
+  },
+  "cases": [
+    {
+      "name": "location-map-preview.prepareLocationMap",
+      "status": "pass",
+      "apiName": "prepareLocationMap",
+      "componentPath": "components/location-map-preview/index",
+      "snapshot": "testdata/render-ir/location-map-preview.prepareLocationMap.json",
+      "snapshotStatus": "match",
+      "auditBoundary": "host-location-provider-fail-closed",
+      "riskLevel": "L4",
+      "dataPolicy": "opaque-location-token-only"
+    }
+  ],
+  "riskNotes": [
+    "mock-only compatibility fixture",
+    "uses opaque location handle only",
+    "production Host location provider and ConsentGate review are required"
+  ]
+}

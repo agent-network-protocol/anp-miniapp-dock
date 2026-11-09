@@ -1,10 +1,10 @@
 use crate::permissions::{Capability, CapabilityProfile, PermissionDecision};
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::Value;
 use std::collections::BTreeMap;
 use thiserror::Error;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub enum WxMethod {
     Get,
     Post,
@@ -58,6 +58,9 @@ pub enum WxRequestError {
     #[error("request denied: {0}")]
     Denied(String),
 
+    #[error("request transport failed: {0}")]
+    Transport(String),
+
     #[error("request unsupported: {0}")]
     Unsupported(String),
 }
@@ -84,20 +87,12 @@ impl RequestBroker for UnsupportedRequestBroker {
                 "wx.request is defined by wx-compat but real ANP HTTP is implemented in Step 08"
                     .to_owned(),
             )),
-            PermissionDecision::Deny { reason, .. } => Err(WxRequestError::Denied(reason)),
+            PermissionDecision::MockAllowed { reason, .. } => Err(WxRequestError::Unsupported(
+                format!("wx.request mock permission reached unsupported broker: {reason}"),
+            )),
+            PermissionDecision::Deny { reason, .. } | PermissionDecision::Prompt { reason, .. } => {
+                Err(WxRequestError::Denied(reason))
+            }
         }
     }
-}
-
-pub fn unsupported_api(name: &str) -> Map<String, Value> {
-    let mut value = Map::new();
-    value.insert(
-        "errMsg".to_owned(),
-        Value::String(format!("{name}:unsupported")),
-    );
-    value.insert(
-        "reason".to_owned(),
-        Value::String("mapped to ANP runtime or later integration step".to_owned()),
-    );
-    value
 }

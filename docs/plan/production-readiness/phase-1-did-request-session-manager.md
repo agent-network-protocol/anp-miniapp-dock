@@ -31,7 +31,7 @@ Unknown
   -> Failed
 ```
 
-实现可先不暴露完整状态机，但内部日志和测试应能区分：未登录、登录中、token 有效、token 过期、已撤销、失败。
+实现可先不暴露完整状态机，但内部日志和测试应能区分：未登录、登录中、token 有效、token 过期、已撤销、失败。Step 01-04 当前已落地 `DidAuthSessionManager` 的 active/missing/expired/clear 语义；持久化 revocation list、logout API 和跨进程 session store 仍留到 Phase 3/4。
 
 ### 2.3 Token Claims
 
@@ -108,13 +108,15 @@ wx.checkSession()
 wx.request(options)
   -> normalize URL and method
   -> request allowlist check
-  -> remove/deny JS-provided Authorization
+  -> deny JS-provided Authorization / Signature / Signature-Input / Cookie
   -> ensure_session when endpoint requires auth
   -> attach Authorization: Bearer <cached token>
-  -> send through HttpTransport
+  -> send through RequestBroker / HttpTransport
   -> if 401 and safe to retry: clear token, re-login, retry once
   -> redact response headers before JS/log/audit when needed
 ```
+
+Step 01-04 当前实现把 Atomic API `wx.request` 接到 `wx-compat::RequestBroker` trait 的本地 DID broker：只允许 loopback demo URL、拒绝 Host-owned auth headers、通过 `DidAuthSessionManager` 注入 bearer token、并在返回 JS 前剥离 response auth/token headers。生产 Host transport、registry allowlist、持久化 request audit 和非 demo 部署策略仍属于 Phase 4。
 
 ## 6. Server Contract
 
@@ -181,7 +183,7 @@ wx.request(options)
 
 ## 9. 完成标准
 
-- [ ] `DidAuthSessionManager` 有清晰 public API 或 crate 内接口。
-- [ ] `wx.login`、`wx.checkSession`、`wx.request` 均复用该 manager。
+- [x] `DidAuthSessionManager` 有清晰 public API 或 crate 内接口。
+- [x] `wx.login`、`wx.checkSession`、`wx.request` 均复用该 manager。
 - [ ] demo-server 与 FastAPI 示例使用同一 JSON contract。
-- [ ] 所有失败路径 fail closed 并脱敏。
+- [x] Step 01-04 覆盖的失败路径 fail closed 并脱敏；生产 Host transport、persistent audit、logout/revocation list 留到后续阶段。

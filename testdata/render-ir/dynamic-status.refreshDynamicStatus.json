@@ -1,0 +1,148 @@
+{
+  "actions": [],
+  "auditSummary": {
+    "boundary": "dynamic-request-timer-gated",
+    "brokerCalls": 1,
+    "dataPolicy": "response-auth-headers-redacted",
+    "provider": "RequestBroker",
+    "riskLevel": "L2"
+  },
+  "component": "dynamic-status",
+  "eventActions": [
+    {
+      "content": [
+        {
+          "text": "Refresh mock status",
+          "type": "text"
+        },
+        {
+          "data": {
+            "arguments": {
+              "orderId": "order_demo_001"
+            },
+            "name": "refreshDynamicStatus"
+          },
+          "type": "api/call"
+        }
+      ],
+      "type": "sendFollowUpMessage"
+    },
+    {
+      "arguments": {
+        "orderId": "order_demo_001"
+      },
+      "name": "refreshDynamicStatus",
+      "type": "api/call"
+    }
+  ],
+  "expire": {
+    "expired": true,
+    "ok": true
+  },
+  "fixture": "dynamic-status",
+  "metadata": {
+    "componentPath": "components/dynamic-status/index",
+    "dynamic": true,
+    "expirable": true,
+    "expiredText": "Mock dynamic status expired",
+    "scopeDynamic": {
+      "desc": "Poll mock order status through RequestBroker",
+      "reason": "fixture-only status refresh"
+    }
+  },
+  "render": {
+    "root": {
+      "children": [
+        {
+          "id": "text-1",
+          "kind": "text",
+          "style": {
+            "color": "#1f2933",
+            "fontSize": "17px",
+            "fontWeight": "600"
+          },
+          "text": "Mock dynamic status"
+        },
+        {
+          "id": "text-3",
+          "kind": "text",
+          "text": "order_demo_001"
+        },
+        {
+          "id": "text-5",
+          "kind": "text",
+          "text": "ready"
+        },
+        {
+          "id": "text-7",
+          "kind": "text",
+          "text": "timer-flushed"
+        },
+        {
+          "id": "text-9",
+          "kind": "text",
+          "text": "broker-ok"
+        },
+        {
+          "children": [
+            {
+              "id": "text-12",
+              "kind": "text",
+              "text": "Refresh status"
+            }
+          ],
+          "events": [
+            {
+              "dataset": {
+                "order-id": "order_demo_001"
+              },
+              "event": "tap",
+              "method": "refresh"
+            }
+          ],
+          "id": "button-11",
+          "kind": "button",
+          "style": {
+            "background": "#245d63",
+            "color": "#ffffff",
+            "margin": "8px 0 0 0",
+            "padding": "6px"
+          }
+        }
+      ],
+      "id": "view-0",
+      "kind": "view",
+      "style": {
+        "background": "#ffffff",
+        "border": "1px solid #d9dee8",
+        "borderRadius": "8px",
+        "padding": "12px"
+      }
+    },
+    "schemaVersion": "dock.render-ir.v1",
+    "warnings": []
+  },
+  "state": {
+    "_meta": {
+      "fixture": "refreshDynamicStatus",
+      "mockOnly": true
+    },
+    "apiName": "refreshDynamicStatus",
+    "arguments": {
+      "orderId": "order_demo_001"
+    },
+    "content": [
+      {
+        "text": "refreshDynamicStatus fixture result",
+        "type": "text"
+      }
+    ],
+    "errorCode": "",
+    "orderId": "order_demo_001",
+    "pollCount": 1,
+    "safeHeader": "broker-ok",
+    "status": "ready",
+    "timerState": "timer-flushed"
+  },
+  "warnings": []
+}

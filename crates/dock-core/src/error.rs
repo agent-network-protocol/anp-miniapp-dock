@@ -11,6 +11,7 @@ pub enum ErrorCode {
     VmFailed,
     RenderFailed,
     Timeout,
+    AuditUnavailable,
 }
 
 impl ErrorCode {
@@ -23,6 +24,7 @@ impl ErrorCode {
             Self::VmFailed => "vm_failed",
             Self::RenderFailed => "render_failed",
             Self::Timeout => "timeout",
+            Self::AuditUnavailable => "audit_unavailable",
         }
     }
 }

@@ -1,12 +1,14 @@
 use crate::api_registry::ApiRegistry;
 use crate::error::{DockCoreError, ErrorCode};
 use crate::host::{
-    ApiExecutor, AuditEvent, AuditSink, ConsentDecision, ConsentGate, PermissionDecision,
+    ApiExecutor, AuditEvent, AuditSink, ConsentDecision, ConsentGate, HostActionOutcome,
+    HostActionRequest, HostAdapterContract, PermissionDecision, PermissionDecisionSummary,
     RenderOutcome, RenderRouter, RuntimeHost,
 };
+use crate::observability::TraceContext;
 use consent_audit::{
-    build_consent_request, consent_proof, parameter_digest, redact_value, AuditOutcome,
-    ConsentProof, ConsentRequestInput, RiskLevel, RiskPolicy,
+    build_consent_request, consent_proof_with_decision, parameter_digest, redact_value,
+    AuditOutcome, ConsentProof, ConsentRequestInput, RiskLevel, RiskPolicy,
 };
 use mcp_schema::{validate_api_result, validate_input, AtomicApiResult, TextContent};
 use serde_json::{Map, Value};
@@ -22,6 +24,7 @@ pub struct ApiCallContext {
     pub api_name: String,
     pub arguments: Value,
     pub capability_token: Option<String>,
+    pub trace: Option<TraceContext>,
 }
 
 impl ApiCallContext {
@@ -112,23 +115,38 @@ where
         let risk_level = RiskPolicy::new().infer_api_risk(&registered.declaration);
         let input_report = validate_input(&registered.declaration.input_schema, &context.arguments);
         if !input_report.is_valid() {
-            self.record_audit(&context, risk_level, None, AuditOutcome::ValidationFailed)?;
+            self.record_audit(
+                &context,
+                risk_level,
+                permission_not_evaluated_summary(),
+                None,
+                AuditOutcome::ValidationFailed,
+            )?;
             return Err(DockCoreError::validation(
                 format!("arguments for `{}` failed inputSchema", context.api_name),
                 input_report,
             ));
         }
 
-        match self.host.check_permission(&context)? {
-            PermissionDecision::Allow => {}
-            PermissionDecision::Deny(reason) => {
+        let permission_decision = self.host.check_permission(&context)?;
+        let permission_summary = permission_decision.summary();
+        match permission_decision {
+            PermissionDecision::Allow
+            | PermissionDecision::Prompt { .. }
+            | PermissionDecision::MockAllowedDevOnly { .. } => {}
+            PermissionDecision::Deny { .. } => {
+                let safe_reason = permission_summary.reason.clone();
                 self.record_audit(
                     &context,
                     risk_level,
+                    permission_summary,
                     None,
                     AuditOutcome::BlockedPermissionDenied,
                 )?;
-                return Err(DockCoreError::core(ErrorCode::PermissionDenied, reason));
+                return Err(DockCoreError::core(
+                    ErrorCode::PermissionDenied,
+                    safe_reason,
+                ));
             }
         }
 
@@ -144,11 +162,29 @@ where
         });
         let mut proof = None;
         if risk_level.requires_consent() {
-            match self.consent.check_consent(&context, &consent_request)? {
-                ConsentDecision::Approved => {
-                    proof = Some(consent_proof(
+            let consent_decision = match self.consent.check_consent(&context, &consent_request) {
+                Ok(decision) => decision,
+                Err(error) => {
+                    self.record_audit(
+                        &context,
+                        risk_level,
+                        permission_summary,
+                        None,
+                        AuditOutcome::BlockedConsentRequired,
+                    )?;
+                    return Err(error);
+                }
+            };
+
+            match consent_decision {
+                ConsentDecision::Approved {
+                    provider,
+                    decision_actor,
+                } => {
+                    proof = Some(consent_proof_with_decision(
                         &consent_request,
-                        "dock-core-consent-gate",
+                        provider,
+                        decision_actor,
                         parameter_digest(&consent_request.parameter_summary),
                     ));
                 }
@@ -156,25 +192,45 @@ where
                     self.record_audit(
                         &context,
                         risk_level,
+                        permission_summary,
                         None,
                         AuditOutcome::BlockedConsentRequired,
                     )?;
                     return Err(DockCoreError::core(ErrorCode::ConsentRequired, reason));
                 }
             }
+
+            self.audit.ensure_available().map_err(|_| {
+                DockCoreError::core(
+                    ErrorCode::AuditUnavailable,
+                    "audit sink unavailable for high-risk action",
+                )
+            })?;
         }
 
         let component_path = registered.declaration.component_path();
         let result = match self.executor.execute(&context, component_path) {
             Ok(result) => result,
             Err(error) => {
-                self.record_audit(&context, risk_level, proof, AuditOutcome::Error)?;
+                self.record_audit(
+                    &context,
+                    risk_level,
+                    permission_summary,
+                    proof,
+                    AuditOutcome::Error,
+                )?;
                 return Err(error);
             }
         };
         let result_report = validate_api_result(&result);
         if !result_report.is_valid() {
-            self.record_audit(&context, risk_level, proof, AuditOutcome::ValidationFailed)?;
+            self.record_audit(
+                &context,
+                risk_level,
+                permission_summary,
+                proof,
+                AuditOutcome::ValidationFailed,
+            )?;
             return Err(DockCoreError::validation(
                 format!(
                     "API `{}` returned invalid AtomicApiResult",
@@ -185,7 +241,13 @@ where
         }
 
         let render = self.route_result(&context, &result, component_path);
-        self.record_audit(&context, risk_level, proof, AuditOutcome::Ok)?;
+        self.record_audit(
+            &context,
+            risk_level,
+            permission_summary,
+            proof,
+            AuditOutcome::Ok,
+        )?;
 
         Ok(CallOutcome {
             model_visible: serde_json::to_value(result.model_visible()).map_err(|error| {
@@ -197,6 +259,11 @@ where
             result,
             render,
         })
+    }
+
+    pub fn api_risk_level(&self, api_name: &str) -> Result<RiskLevel, DockCoreError> {
+        let registered = self.registry.get(api_name)?;
+        Ok(RiskPolicy::new().infer_api_risk(&registered.declaration))
     }
 
     pub fn handle_component_action(
@@ -212,6 +279,26 @@ where
             | ComponentAction::OpenDetailPage { .. }
             | ComponentAction::ExpirePreviousCards { .. } => Ok(None),
         }
+    }
+
+    pub fn render_component(
+        &self,
+        context: &ApiCallContext,
+        input: ComponentRenderInput,
+    ) -> Result<RenderOutcome, DockCoreError> {
+        self.renderer.render(context, &input)
+    }
+
+    pub fn host_contract(&self) -> HostAdapterContract {
+        self.host.adapter_contract()
+    }
+
+    pub fn handle_host_action(
+        &self,
+        context: &ApiCallContext,
+        request: HostActionRequest,
+    ) -> Result<HostActionOutcome, DockCoreError> {
+        self.host.handle_host_action(context, request)
     }
 
     pub fn registry(&self) -> &ApiRegistry {
@@ -247,11 +334,10 @@ where
 
         match self.renderer.render(context, &input) {
             Ok(render) => Some(render),
-            Err(error) => Some(self.renderer.fallback(
-                context,
-                result,
-                &format!("render_failed: {error}"),
-            )),
+            Err(_error) => Some(
+                self.renderer
+                    .fallback(context, result, "component_vm_failed"),
+            ),
         }
     }
 
@@ -259,6 +345,7 @@ where
         &self,
         context: &ApiCallContext,
         risk_level: RiskLevel,
+        permission_decision: PermissionDecisionSummary,
         consent_proof: Option<ConsentProof>,
         outcome: AuditOutcome,
     ) -> Result<(), DockCoreError> {
@@ -271,8 +358,18 @@ where
             api_name: context.api_name.clone(),
             risk_level,
             parameter_summary: redact_value(&context.arguments),
+            permission_decision,
             consent_proof,
             outcome: outcome.to_string(),
         })
+    }
+}
+
+fn permission_not_evaluated_summary() -> PermissionDecisionSummary {
+    PermissionDecisionSummary {
+        decision: "not_evaluated".to_owned(),
+        reason_code: "input_validation_failed".to_owned(),
+        reason: "input validation failed before permission policy evaluation".to_owned(),
+        dev_only: false,
     }
 }

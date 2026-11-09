@@ -11,5 +11,6 @@ consent-audit = { path = "../consent-audit" }
 mcp-schema = { path = "../mcp-schema" }
 serde.workspace = true
 serde_json.workspace = true
+sha2.workspace = true
 skill-loader = { path = "../skill-loader" }
 thiserror.workspace = true

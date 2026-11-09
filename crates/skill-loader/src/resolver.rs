@@ -15,6 +15,15 @@ pub enum SkillPackageError {
     #[error("absolute paths are not allowed in skill packages: `{path}`")]
     AbsolutePath { path: PathBuf },
 
+    #[error("archive entry path is not allowed in skill packages: `{path}`")]
+    ZipSlipPath { path: String },
+
+    #[error("invalid package entry `{path}`: {reason}")]
+    InvalidPackageEntry { path: PathBuf, reason: String },
+
+    #[error("skill package was quarantined by integrity policy: {reason}")]
+    PackageQuarantined { reason: String },
+
     #[error("failed to read `{path}`: {source}")]
     ReadFile {
         path: PathBuf,

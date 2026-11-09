@@ -1,6 +1,6 @@
 use mcp_schema::{
     validate_api_result, validate_input, validate_manifest, validate_manifest_with_component_paths,
-    validate_output_warning, AtomicApiResult, SkillManifest, TextContent,
+    validate_output_warning, AtomicApiResult, SkillManifest, TextContent, ValidationIssueCategory,
 };
 use serde_json::{json, Value};
 
@@ -50,9 +50,33 @@ fn valid_manifest_json() -> Value {
                         "desc": "刷新饮品库存"
                     }
                 },
+                "relatedPage": {
+                    "path": "pages/drink/detail",
+                    "query": {
+                        "source": "card"
+                    }
+                },
+                "expirable": true,
+                "expiredText": "饮品列表已过期，请重新搜索",
                 "unknownComponentField": "kept"
             }
         ],
+        "_meta": {
+            "anp": {
+                "supplyChain": {
+                    "publisherDid": "did:wba:publisher.example",
+                    "digest": {
+                        "algorithm": "sha256",
+                        "value": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+                    },
+                    "signature": {
+                        "algorithm": "dock.package.dev-sha256.v1",
+                        "keyId": "did:wba:publisher.example#package-key-1",
+                        "value": "fixture-signature"
+                    }
+                }
+            }
+        },
         "unknownRootField": {
             "kept": true
         }
@@ -67,6 +91,7 @@ fn validates_legal_coffee_manifest_and_keeps_unknown_fields() {
 
     assert!(report.is_valid(), "{report:#?}");
     assert!(manifest.extra.contains_key("unknownRootField"));
+    assert!(manifest.supply_chain_meta().is_some());
     assert!(manifest.apis[0].extra.contains_key("x_anp"));
     assert!(manifest.components[0]
         .extra
@@ -75,6 +100,61 @@ fn validates_legal_coffee_manifest_and_keeps_unknown_fields() {
         manifest.apis[0].component_path(),
         Some("components/drink-list/index")
     );
+    assert!(manifest.components[0].dynamic_permission().is_some());
+    assert_eq!(manifest.components[0].expirable, Some(true));
+}
+
+#[test]
+fn unsigned_manifest_is_a_production_warning_not_a_spec_error() {
+    let mut value = valid_manifest_json();
+    value.as_object_mut().unwrap().remove("_meta");
+    let manifest: SkillManifest = serde_json::from_value(value).unwrap();
+
+    let report = validate_manifest(&manifest);
+
+    assert!(report.is_valid(), "{report:#?}");
+    assert!(report.warnings.iter().any(|issue| {
+        issue.category == ValidationIssueCategory::Production
+            && issue.path == "_meta.anp.supplyChain"
+            && issue.message.contains("unsigned")
+    }));
+}
+
+#[test]
+fn malformed_supply_chain_contract_reports_production_warnings() {
+    let mut value = valid_manifest_json();
+    value["_meta"]["anp"]["supplyChain"] = json!({
+        "publisherDid": "not-a-did",
+        "digest": {
+            "algorithm": "sha1",
+            "value": "ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789ABCDEF0123456789"
+        },
+        "signature": {
+            "algorithm": "",
+            "keyId": "",
+            "value": ""
+        }
+    });
+    let manifest: SkillManifest = serde_json::from_value(value).unwrap();
+
+    let report = validate_manifest(&manifest);
+
+    assert!(report.is_valid(), "{report:#?}");
+    for path in [
+        "_meta.anp.supplyChain.publisherDid",
+        "_meta.anp.supplyChain.digest.algorithm",
+        "_meta.anp.supplyChain.digest.value",
+        "_meta.anp.supplyChain.signature.algorithm",
+        "_meta.anp.supplyChain.signature.keyId",
+        "_meta.anp.supplyChain.signature.value",
+    ] {
+        assert!(
+            report.warnings.iter().any(|issue| {
+                issue.category == ValidationIssueCategory::Production && issue.path == path
+            }),
+            "missing warning for {path}: {report:#?}"
+        );
+    }
 }
 
 #[test]
@@ -164,6 +244,75 @@ fn output_schema_mismatch_is_warning_only() {
 
     assert!(report.is_valid());
     assert!(!report.warnings.is_empty());
+}
+
+#[test]
+fn reports_component_metadata_and_media_format_warnings() {
+    let mut manifest: SkillManifest = serde_json::from_value(valid_manifest_json()).unwrap();
+    manifest.apis[0].input_schema = json!({
+        "type": "object",
+        "properties": {
+            "image": {
+                "type": "string",
+                "format": "image"
+            }
+        }
+    });
+
+    let report = validate_manifest(&manifest);
+
+    assert!(report.is_valid(), "{report:#?}");
+    assert!(report.warnings.iter().any(|issue| {
+        issue.category == ValidationIssueCategory::Compatibility
+            && issue.path == "apis[0].inputSchema.image"
+            && issue.message.contains("format `image`")
+            && issue.suggestion.is_some()
+    }));
+    assert!(report.warnings.iter().any(|issue| {
+        issue.category == ValidationIssueCategory::Production
+            && issue.path == "components[0].permissions.scope.dynamic"
+            && issue.suggestion.is_some()
+    }));
+}
+
+#[test]
+fn reports_root_media_format_without_empty_path_suffix() {
+    let mut manifest: SkillManifest = serde_json::from_value(valid_manifest_json()).unwrap();
+    manifest.apis[0].input_schema = json!({
+        "type": "object",
+        "format": "file"
+    });
+
+    let report = validate_manifest(&manifest);
+
+    assert!(report.is_valid(), "{report:#?}");
+    assert!(report.warnings.iter().any(|issue| {
+        issue.category == ValidationIssueCategory::Compatibility
+            && issue.path == "apis[0].inputSchema"
+            && issue.message.contains("format `file`")
+            && issue.suggestion.is_some()
+    }));
+}
+
+#[test]
+fn warns_about_unsafe_related_page_shape() {
+    let mut manifest: SkillManifest = serde_json::from_value(valid_manifest_json()).unwrap();
+    manifest.components[0].related_page = Some(json!({
+        "path": "../outside",
+        "query": "raw"
+    }));
+
+    let report = validate_manifest(&manifest);
+
+    assert!(report.is_valid(), "{report:#?}");
+    assert!(report.warnings.iter().any(|issue| {
+        issue.path == "components[0].relatedPage.path"
+            && issue.category == ValidationIssueCategory::Compatibility
+    }));
+    assert!(report.warnings.iter().any(|issue| {
+        issue.path == "components[0].relatedPage.query"
+            && issue.category == ValidationIssueCategory::Compatibility
+    }));
 }
 
 #[test]

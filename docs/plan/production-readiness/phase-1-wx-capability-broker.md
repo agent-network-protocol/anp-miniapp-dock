@@ -16,6 +16,8 @@ Phase 1 要把原子接口环境从“coffee demo 可跑”升级为“核心小
 - [wx API Bridge Contract](phase-1-wx-api-bridge-contract.md)
 - [DID Request Session Manager](phase-1-did-request-session-manager.md)
 
+> 执行状态提示：本文是 Phase 1 总体实施计划。首批 Step 01-01 至 01-04 已完成并回填到 [`../production-readiness-roadmap.md`](../production-readiness-roadmap.md)；Step 01-05 正在补齐 deterministic unsupported stub。下方阶段完成检查只标记已由这些 Step 证明的子集，storage 和 L3/L4 真实 provider 仍是后续 Phase/Step 工作。
+
 ## 2. 涉及模块
 
 | 模块 | 主要职责 |
@@ -126,6 +128,11 @@ WxApiOutcome
 - 空 key、超限 value fail closed；
 - storage 内容不自动进入 model visible result。
 
+当前状态：
+
+- Step 01-06 已完成 Atomic API `wx.getStorage` / `setStorage` / `removeStorage` / `clearStorage` 及同步版本的 JS bridge。
+- 当前 backend 是 runtime-local in-memory scoped storage；生产持久化、加密、migration、backend quota 和 cleanup 留到 Phase 4。
+
 ### 3.6 隐私、媒体、位置、支付和其它高风险 API
 
 优先级：
@@ -172,10 +179,10 @@ WxApiOutcome
 
 ## 5. 阶段完成检查
 
-- [ ] `wx.modelContext.getSessionId`、`expireAllCards` 已注入 Atomic API VM。
-- [ ] `wx.login`、`wx.checkSession` 通过正式 `DidAuthSessionManager`。
-- [ ] `wx.request` 通过正式 RequestBroker，不再依赖散落 demo bridge。
+- [x] `wx.modelContext.getSessionId`、`expireAllCards` 已注入 Atomic API VM。
+- [x] `wx.login`、`wx.checkSession` 通过正式 `DidAuthSessionManager`。
+- [x] `wx.request` 通过 `wx-compat::RequestBroker` trait 的本地 DID broker；生产 Host transport、registry allowlist 和持久化 request audit 留到 Phase 4。
 - [ ] storage API 同步/异步版本可用且 scope 隔离。
 - [ ] L3/L4 API 进入 ConsentGate 和 audit。
-- [ ] unsupported API 有稳定错误形态。
-- [ ] `wx-api-compatibility-matrix.md` 与实现状态一致。
+- [x] unsupported API 有稳定错误形态；Step 01-05 已覆盖 registry stub、async callback/Promise、sync throw、nested `wx.cloud.*` 和 unknown root fallback。
+- [x] `wx-api-compatibility-matrix.md` 与 Step 01-03 / 01-04 / 01-05 实现状态一致；真实 storage bridge、device/app info provider 和 L3/L4 Host provider 仍按后续 Step 保留为 planned。

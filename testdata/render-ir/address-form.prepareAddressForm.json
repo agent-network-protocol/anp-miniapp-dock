@@ -1,0 +1,202 @@
+{
+  "actions": [],
+  "auditSummary": {
+    "boundary": "host-provider-consent-required",
+    "dataPolicy": "opaque-address-handle-only",
+    "provider": "wx.chooseAddress",
+    "riskLevel": "L4"
+  },
+  "component": "address-form",
+  "eventActions": [
+    {
+      "content": [
+        {
+          "text": "Submit mock address handle",
+          "type": "text"
+        },
+        {
+          "data": {
+            "arguments": {
+              "addressHandle": "addr_handle_demo_001",
+              "deliverySlot": "10:00-11:00"
+            },
+            "name": "prepareAddressForm"
+          },
+          "type": "api/call"
+        }
+      ],
+      "type": "sendFollowUpMessage"
+    },
+    {
+      "arguments": {
+        "addressHandle": "addr_handle_demo_001",
+        "deliverySlot": "10:00-11:00"
+      },
+      "name": "prepareAddressForm",
+      "type": "api/call"
+    }
+  ],
+  "expire": {
+    "expired": true,
+    "ok": true
+  },
+  "fixture": "address-form",
+  "metadata": {
+    "componentPath": "components/address-form/index",
+    "dynamic": false,
+    "expirable": true,
+    "expiredText": "Mock address form expired",
+    "relatedPage": {
+      "path": "pages/address/review",
+      "query": {
+        "fixture": "address-form"
+      }
+    }
+  },
+  "render": {
+    "root": {
+      "children": [
+        {
+          "id": "text-1",
+          "kind": "text",
+          "style": {
+            "color": "#1f2933",
+            "fontSize": "17px",
+            "fontWeight": "600"
+          },
+          "text": "Mock delivery address"
+        },
+        {
+          "events": [
+            {
+              "event": "input",
+              "method": "onRecipient"
+            }
+          ],
+          "id": "input-3",
+          "kind": "input",
+          "props": {
+            "maxLength": 32,
+            "name": "recipient",
+            "placeholder": "Recipient name",
+            "value": "Demo Recipient"
+          }
+        },
+        {
+          "events": [
+            {
+              "event": "input",
+              "method": "onNote"
+            }
+          ],
+          "id": "textarea-4",
+          "kind": "textarea",
+          "props": {
+            "name": "note",
+            "placeholder": "Delivery note",
+            "value": "Use opaque address handle only"
+          }
+        },
+        {
+          "events": [
+            {
+              "event": "change",
+              "method": "onSlotChange"
+            }
+          ],
+          "id": "picker-5",
+          "kind": "picker",
+          "props": {
+            "name": "slot",
+            "options": [
+              "09:00-10:00",
+              "10:00-11:00"
+            ],
+            "value": 1
+          }
+        },
+        {
+          "id": "text-6",
+          "kind": "text",
+          "style": {
+            "color": "#465a69",
+            "fontSize": "13px"
+          },
+          "text": "wx.chooseAddress:host-boundary"
+        },
+        {
+          "children": [
+            {
+              "id": "text-9",
+              "kind": "text",
+              "text": "Use opaque address handle"
+            }
+          ],
+          "events": [
+            {
+              "dataset": {
+                "address-handle": "addr_handle_demo_001"
+              },
+              "event": "tap",
+              "method": "submit"
+            }
+          ],
+          "id": "button-8",
+          "kind": "button",
+          "style": {
+            "background": "#245d63",
+            "color": "#ffffff",
+            "margin": "8px 0 0 0",
+            "padding": "6px"
+          }
+        }
+      ],
+      "id": "view-0",
+      "kind": "view",
+      "style": {
+        "background": "#ffffff",
+        "border": "1px solid #d9dee8",
+        "borderRadius": "8px",
+        "padding": "12px"
+      }
+    },
+    "schemaVersion": "dock.render-ir.v1",
+    "warnings": []
+  },
+  "state": {
+    "_meta": {
+      "fixture": "prepareAddressForm",
+      "mockOnly": true
+    },
+    "addressHandle": "addr_handle_demo_001",
+    "apiName": "prepareAddressForm",
+    "arguments": {
+      "addressHandle": "addr_handle_demo_001"
+    },
+    "boundary": "wx.chooseAddress:host-boundary",
+    "content": [
+      {
+        "text": "prepareAddressForm fixture result",
+        "type": "text"
+      }
+    ],
+    "form": {
+      "addressHandle": "addr_handle_demo_001",
+      "note": "Use opaque address handle only",
+      "recipient": "Demo Recipient",
+      "selectedSlot": 1,
+      "slots": [
+        "09:00-10:00",
+        "10:00-11:00"
+      ]
+    },
+    "note": "Use opaque address handle only",
+    "recipient": "Demo Recipient",
+    "selectedSlot": 1,
+    "slots": [
+      "09:00-10:00",
+      "10:00-11:00"
+    ]
+  },
+  "warnings": []
+}

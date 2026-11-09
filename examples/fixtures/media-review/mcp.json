@@ -1,0 +1,51 @@
+{
+  "apis": [
+    {
+      "name": "reviewMedia",
+      "description": "Review mock opaque media handles without reading local files",
+      "_meta": {
+        "ui": {
+          "componentPath": "components/media-review/index"
+        },
+        "anp": {
+          "risk": "l4"
+        }
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "imageHandle": {
+            "type": "string",
+            "format": "image",
+            "description": "Opaque Host image handle"
+          },
+          "fileHandle": {
+            "type": "string",
+            "format": "file",
+            "description": "Opaque Host file handle"
+          }
+        }
+      },
+      "outputSchema": {
+        "type": "object",
+        "properties": {
+          "media": {
+            "type": "object"
+          },
+          "boundary": {
+            "type": "object"
+          }
+        },
+        "required": ["media", "boundary"]
+      }
+    }
+  ],
+  "components": [
+    {
+      "path": "components/media-review/index",
+      "expirable": true,
+      "expiredText": "Mock media review expired"
+    }
+  ]
+}
+

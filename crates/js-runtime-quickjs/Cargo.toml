@@ -16,3 +16,4 @@ serde.workspace = true
 serde_json.workspace = true
 skill-loader = { path = "../skill-loader" }
 thiserror.workspace = true
+wx-compat = { path = "../wx-compat" }
